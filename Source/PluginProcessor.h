@@ -1,7 +1,9 @@
 #pragma once
 #include <JuceHeader.h>
 #include <array>
+#include <vector>
 #include "Dsp.h"
+#include "PresetManager.h"
 
 namespace ID
 {
@@ -56,7 +58,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "Berry Tone"; }
+    const juce::String getName() const override { return "BerryTone"; }
     bool acceptsMidi() const override  { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -71,7 +73,12 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
+    // Full state (parameters + order + design) as XML. Presets use the same format.
+    std::unique_ptr<juce::XmlElement> stateToXml();
+    bool stateFromXml (const juce::XmlElement&);
+
     juce::AudioProcessorValueTreeState apvts;
+    PresetManager presets { *this };
 
     // Processing order of the 7 modules. Slot -> module id:
     // 0 Tightener, 1 Gate, 2 Chug, 3 Octave, 4 Impedance, 5 Tilt, 6 Destroyer
@@ -79,8 +86,29 @@ public:
     std::array<int, numModules> getOrder() const;
     void setOrder (const std::array<int, numModules>& newOrder);
 
+    Design getDesign() const;
+    void setDesign (Design);
+
+    // PURE DI: mutes all modules (and the trims). Monitoring only, not saved.
+    std::atomic<bool> pureDi { false };
+
     // UI meters (peak since last read; gate gain)
     std::atomic<float> inPeak { 0.f }, outPeak { 0.f }, gateGain { 1.f };
+
+    // ---- DI scope data ------------------------------------------------------
+    // The audio thread writes one column per bucket of samples.
+    // One window of the scope = scopeCols columns = scopeWindowSec seconds.
+    static constexpr int scopeCols = 600;
+    static constexpr float scopeWindowSec = 1.0f;
+    struct ScopeCol { float diMin, diMax, outMin, outMax; };
+    // Copies the newest scopeCols columns (oldest first) into dest.
+    void readScope (std::vector<ScopeCol>& dest) const;
+
+    // ---- FLAT LINE mode -----------------------------------------------------
+    // Sends a flat-spectrum test signal through a copy of the current chain
+    // (same parameters, same order) and returns the gain in dB at each frequency.
+    // Message thread only. Returns false when nothing changed since the last call.
+    bool computeResponse (const std::vector<float>& freqsHz, std::vector<float>& dbOut, bool force = false);
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -108,6 +136,17 @@ private:
     berry::SoundDestroyer   dest;
 
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> inSmooth, outSmooth;
+    float pureMix = 0.f, pureStep = 0.001f;
+
+    // scope ring buffer (lock-free: relaxed atomics, one writer)
+    static constexpr int scopeRing = 2048;
+    struct AtomicCol { std::atomic<float> v[4]; };
+    std::array<AtomicCol, scopeRing> scopeBuf;
+    std::atomic<int> scopeWrite { 0 };
+    int scopeBucket = 80, scopeCount = 0;
+    ScopeCol scopeAcc { 0.f, 0.f, 0.f, 0.f };
+
+    std::vector<float> lastResponseKey;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BerryToneAudioProcessor)
 };

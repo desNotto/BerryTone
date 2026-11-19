@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
-project(BerryTone VERSION 1.0.0)
+# The version lives here. Release builds can override it: -DBERRY_VERSION=x.y.z
+if(NOT DEFINED BERRY_VERSION)
+    set(BERRY_VERSION 1.1.0)
+endif()
+project(BerryTone VERSION ${BERRY_VERSION})
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,8 +21,9 @@ if(APPLE)
 endif()
 
 juce_add_plugin(BerryTone
-    COMPANY_NAME "Berry Audio"
-    PRODUCT_NAME "Berry Tone"
+    COMPANY_NAME "desNotto"
+    PRODUCT_NAME "BerryTone"
+    BUNDLE_ID com.desnotto.berrytone
     FORMATS ${BERRY_FORMATS}
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
@@ -28,7 +33,7 @@ juce_add_plugin(BerryTone
     PLUGIN_CODE BrTn
     VST3_CATEGORIES Fx Distortion
     AU_MAIN_TYPE kAudioUnitType_Effect
-    COPY_PLUGIN_AFTER_BUILD TRUE)
+    COPY_PLUGIN_AFTER_BUILD FALSE)
 
 juce_generate_juce_header(BerryTone)
 
@@ -37,7 +42,15 @@ target_sources(BerryTone PRIVATE
     Source/PluginProcessor.h
     Source/PluginProcessor.cpp
     Source/PluginEditor.h
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/Theme.h
+    Source/Theme.cpp
+    Source/ScopeView.h
+    Source/ScopeView.cpp
+    Source/PresetManager.h
+    Source/PresetManager.cpp
+    Source/Updater.h
+    Source/Updater.cpp)
 
 target_compile_definitions(BerryTone PUBLIC
     JUCE_WEB_BROWSER=0
@@ -48,6 +61,7 @@ target_compile_definitions(BerryTone PUBLIC
 target_link_libraries(BerryTone
     PRIVATE
         juce::juce_audio_utils
+        juce::juce_dsp
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

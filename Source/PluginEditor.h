@@ -1,31 +1,9 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
-
-// Juice-box palette
-namespace berrycol
-{
-    inline const juce::Colour cartonTop  { 0xff9a2fc4 };
-    inline const juce::Colour cartonBot  { 0xff45115a };
-    inline const juce::Colour cream      { 0xfffff3e3 };
-    inline const juce::Colour deep       { 0xff3a0b4d };
-    inline const juce::Colour ink        { 0xff5a1a80 };   // purple used for parameter names + values
-    inline const juce::Colour pink       { 0xffff3d94 };
-    inline const juce::Colour mint       { 0xff35d49a };
-    inline const juce::Colour leaf       { 0xff7bd34b };
-}
-
-class BerryLookAndFeel : public juce::LookAndFeel_V4
-{
-public:
-    BerryLookAndFeel();
-    void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
-                           float startAngle, float endAngle, juce::Slider&) override;
-    void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool highlighted, bool down) override;
-    juce::Font getLabelFont (juce::Label&) override;
-    void drawLabel (juce::Graphics&, juce::Label&) override;
-    static void drawBerry (juce::Graphics&, float cx, float cy, float r);
-};
+#include "Theme.h"
+#include "ScopeView.h"
+#include "Updater.h"
 
 class BerryToneAudioProcessorEditor : public juce::AudioProcessorEditor,
                                       private juce::Timer
@@ -37,7 +15,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    // drag a card's header to reorder the signal chain
+    // drag a card's header to reorder the signal chain; click the logo to change the design
     void mouseMove (const juce::MouseEvent&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -57,9 +35,9 @@ private:
     struct Module
     {
         juce::String title, flavor;
-        int id = 0, stage = 0;
+        int id = 0;
         bool isMaster = false, hasLed = false;
-        int lastOn = -1;
+        float lastAlpha = -1.f;
         juce::ToggleButton on;
         std::unique_ptr<ButtonAtt> onAtt;
         std::vector<std::unique_ptr<Knob>> knobs;
@@ -73,18 +51,58 @@ private:
     int slotOf (int id) const;
     int moduleAtHeader (juce::Point<int>) const;
     void applyOrder();
-    void drawTube (juce::Graphics&, juce::Rectangle<float>, float level, const juce::String& name);
+    void applyDesign (Design);
+    void styleButton (juce::Button&, const juce::String& style);
 
-    BerryLookAndFeel lnf;
+    // painting
+    void paintBerry (juce::Graphics&);
+    void paintGrape (juce::Graphics&);
+    void drawTube (juce::Graphics&, juce::Rectangle<float>, float level, const juce::String& name);
+    void drawLeds (juce::Graphics&, juce::Rectangle<float>, float level, const juce::String& name);
+
+    // presets
+    void showPresetMenu();
+    void savePreset();
+    void savePresetAs();
+    void renamePreset();
+    void deletePreset();
+    void updatePresetLabel();
+
+    // updates
+    void showUpdateDialog();
+    void startInstall();
+
+    // dialogs (shown inside the plugin window)
+    void showMessage (const juce::String& title, const juce::String& text);
+    void askText (const juce::String& title, const juce::String& text, const juce::String& initial,
+                  const juce::String& okText, std::function<void (juce::String)> onOk);
+    void askConfirm (const juce::String& title, const juce::String& text, const juce::String& okText,
+                     bool danger, std::function<void()> onOk);
+    juce::AlertWindow* makeDialog (const juce::String& title, const juce::String& text);
+    void openDialog (juce::AlertWindow*, std::function<void (int, juce::AlertWindow&)> onClose);
+
+    ThemeLookAndFeel lnf;
     BerryToneAudioProcessor& proc;
     std::vector<std::unique_ptr<Module>> modules;
+    Design design = Design::berry;
 
-    juce::Rectangle<int> inTube, outTube, gateLed;
+    ScopeView scope;
+    juce::TextButton modeReal { "REAL DI" }, modeFlat { "FLAT LINE" }, pureBtn, holdBtn { "HOLD" };
+    juce::TextButton presetPrev, presetNext, presetName, saveBtn { "Save" }, saveAsBtn { "Save as" },
+                     renameBtn { "Rename" }, deleteBtn { "Delete" };
+    juce::TextButton updateBtn, resetBtn { "Reset order" };
+
+    juce::SharedResourcePointer<updater::UpdateChecker> checker;
+    std::unique_ptr<updater::UpdateInstaller> installer;
+    juce::Component::SafePointer<juce::AlertWindow> progressDialog;
+
+    juce::Rectangle<int> logoRect { 24, 20, 410, 80 }, scopeCard { 22, 104, 896, 150 },
+                         scopeScreen { 34, 116, 708, 126 }, inMeter, outMeter, gateLed;
     std::array<int, 7> order {};
     int dragId = -1;
-    juce::TextButton resetBtn { "Reset order" };
     float inLvl = 0.f, outLvl = 0.f;
-    bool gateOpenLed = true;
+    bool gateOpenLed = true, lastPure = false;
+    juce::String lastPresetText;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BerryToneAudioProcessorEditor)
 };

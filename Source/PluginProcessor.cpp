@@ -58,7 +58,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout BerryToneAudioProcessor::cre
 
     B (ID::tightOn, "Tightener On", true);
     F (ID::tightFreq, "Tightener Cut",   20.f, 250.f, 60.f, 0.5f, K::Hz);
-    F (ID::tightAmt,  "Tightener Tight", 0.f, 1.f, 0.35f, 1.f, K::pct);
+    F (ID::tightAmt,  "Tightener Tight", 0.f, 3.f, 0.35f, 1.f, K::pct);   // 0-300 %
 
     B (ID::gateOn, "Gate On", false);
     F (ID::gateThresh, "Gate Threshold", -80.f, -20.f, -55.f, 1.f, K::dB);
@@ -111,6 +111,12 @@ BerryToneAudioProcessor::BerryToneAudioProcessor()
 
     for (int i = 0; i < numModules; ++i) order[(size_t) i].store (i);
     apvts.state.setProperty ("order", "0,1,2,3,4,5,6", nullptr);
+    apvts.state.setProperty ("design", "berry", nullptr);
+
+    for (auto& c : scopeBuf)
+        for (auto& v : c.v) v.store (0.f);
+
+    presets.loadIndex (0);   // a new instance starts on the first factory preset
 
     setLatencySamples (0); // no lookahead, no oversampling, no FFT
 }
@@ -155,6 +161,13 @@ void BerryToneAudioProcessor::prepareToPlay (double sr, int)
 
     inSmooth.reset (sr, 0.02);  inSmooth.setCurrentAndTargetValue (berry::dbToLin (p.inGain->load()));
     outSmooth.reset (sr, 0.02); outSmooth.setCurrentAndTargetValue (berry::dbToLin (p.outGain->load()));
+
+    pureStep = (float) (1.0 / (0.015 * sr));   // 15 ms crossfade, no clicks
+    pureMix  = pureDi.load() ? 1.f : 0.f;
+
+    scopeBucket = juce::jmax (1, juce::roundToInt (sr * scopeWindowSec / scopeCols));
+    scopeCount = 0;
+    scopeAcc = { 0.f, 0.f, 0.f, 0.f };
 }
 
 void BerryToneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -190,13 +203,19 @@ void BerryToneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     float* d[berry::kMaxCh] = { buffer.getWritePointer (0), nCh > 1 ? buffer.getWritePointer (1) : nullptr };
     float inPk = 0.f, outPk = 0.f;
 
+    const float pureTarget = pureDi.load (std::memory_order_relaxed) ? 1.f : 0.f;
+    const float chInv = 1.f / (float) nCh;
+    int sw = scopeWrite.load (std::memory_order_relaxed);
+
     for (int i = 0; i < n; ++i)
     {
         float x[berry::kMaxCh] = { 0.f, 0.f };
+        float raw[berry::kMaxCh] = { 0.f, 0.f };
         const float gi = inSmooth.getNextValue();
         for (int c = 0; c < nCh; ++c)
         {
-            x[c] = d[c][i] * gi;
+            raw[c] = d[c][i];
+            x[c] = raw[c] * gi;
             inPk = juce::jmax (inPk, std::fabs (x[c]));
         }
 
@@ -219,10 +238,41 @@ void BerryToneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         }
 
         const float go = outSmooth.getNextValue();
+        if (pureMix != pureTarget)
+            pureMix = pureTarget > pureMix ? juce::jmin (pureTarget, pureMix + pureStep)
+                                           : juce::jmax (pureTarget, pureMix - pureStep);
+
+        float diMono = 0.f, outMono = 0.f;
         for (int c = 0; c < nCh; ++c)
         {
-            d[c][i] = x[c] * go;
+            const float wet = x[c] * go;
+            d[c][i] = wet + pureMix * (raw[c] - wet);     // PURE DI = the raw input, untouched
             outPk = juce::jmax (outPk, std::fabs (d[c][i]));
+            diMono  += raw[c];
+            outMono += d[c][i];
+        }
+
+        // --- DI scope: one min/max column per bucket ---
+        diMono *= chInv; outMono *= chInv;
+        if (scopeCount == 0)
+            scopeAcc = { diMono, diMono, outMono, outMono };
+        else
+        {
+            scopeAcc.diMin  = juce::jmin (scopeAcc.diMin,  diMono);
+            scopeAcc.diMax  = juce::jmax (scopeAcc.diMax,  diMono);
+            scopeAcc.outMin = juce::jmin (scopeAcc.outMin, outMono);
+            scopeAcc.outMax = juce::jmax (scopeAcc.outMax, outMono);
+        }
+        if (++scopeCount >= scopeBucket)
+        {
+            auto& col = scopeBuf[(size_t) sw];
+            col.v[0].store (scopeAcc.diMin,  std::memory_order_relaxed);
+            col.v[1].store (scopeAcc.diMax,  std::memory_order_relaxed);
+            col.v[2].store (scopeAcc.outMin, std::memory_order_relaxed);
+            col.v[3].store (scopeAcc.outMax, std::memory_order_relaxed);
+            sw = (sw + 1) % scopeRing;
+            scopeWrite.store (sw, std::memory_order_release);
+            scopeCount = 0;
         }
     }
 
@@ -236,29 +286,177 @@ juce::AudioProcessorEditor* BerryToneAudioProcessor::createEditor()
     return new BerryToneAudioProcessorEditor (*this);
 }
 
+Design BerryToneAudioProcessor::getDesign() const
+{
+    return apvts.state.getProperty ("design", "berry").toString() == "grape" ? Design::grape : Design::berry;
+}
+
+void BerryToneAudioProcessor::setDesign (Design d)
+{
+    apvts.state.setProperty ("design", d == Design::grape ? "grape" : "berry", nullptr);
+}
+
+std::unique_ptr<juce::XmlElement> BerryToneAudioProcessor::stateToXml()
+{
+    return apvts.copyState().createXml();
+}
+
+bool BerryToneAudioProcessor::stateFromXml (const juce::XmlElement& xml)
+{
+    if (! xml.hasTagName (apvts.state.getType()))
+        return false;
+
+    apvts.replaceState (juce::ValueTree::fromXml (xml));
+
+    std::array<int, numModules> o {};
+    auto tokens = juce::StringArray::fromTokens (apvts.state.getProperty ("order", "0,1,2,3,4,5,6").toString(), ",", "");
+    if (tokens.size() == numModules)
+    {
+        for (int i = 0; i < numModules; ++i) o[(size_t) i] = tokens[i].getIntValue();
+        if (isValidOrder (o)) { setOrder (o); return true; }
+    }
+    for (int i = 0; i < numModules; ++i) o[(size_t) i] = i;
+    setOrder (o);
+    return true;
+}
+
 void BerryToneAudioProcessor::getStateInformation (juce::MemoryBlock& dest_)
 {
-    if (auto xml = apvts.copyState().createXml())
+    if (auto xml = stateToXml())
         copyXmlToBinary (*xml, dest_);
 }
 
 void BerryToneAudioProcessor::setStateInformation (const void* data, int size)
 {
     if (auto xml = getXmlFromBinary (data, size))
-        if (xml->hasTagName (apvts.state.getType()))
-        {
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+        if (stateFromXml (*xml))
+            presets.syncFromState();
+}
 
-            std::array<int, numModules> o {};
-            auto tokens = juce::StringArray::fromTokens (apvts.state.getProperty ("order", "0,1,2,3,4,5,6").toString(), ",", "");
-            if (tokens.size() == numModules)
+//==============================================================================
+void BerryToneAudioProcessor::readScope (std::vector<ScopeCol>& out) const
+{
+    out.resize ((size_t) scopeCols);
+    const int w = scopeWrite.load (std::memory_order_acquire);
+    for (int i = 0; i < scopeCols; ++i)
+    {
+        const auto& c = scopeBuf[(size_t) ((w - scopeCols + i + scopeRing) % scopeRing)];
+        out[(size_t) i] = { c.v[0].load (std::memory_order_relaxed), c.v[1].load (std::memory_order_relaxed),
+                             c.v[2].load (std::memory_order_relaxed), c.v[3].load (std::memory_order_relaxed) };
+    }
+}
+
+bool BerryToneAudioProcessor::computeResponse (const std::vector<float>& freqs, std::vector<float>& db, bool force)
+{
+    // Only recompute when a parameter, the order or PURE DI changed.
+    std::vector<float> key;
+    for (auto* prm : getParameters()) key.push_back (prm->getValue());
+    for (auto& o : order) key.push_back ((float) o.load());
+    key.push_back (pureDi.load() ? 1.f : 0.f);
+    if (! force && key == lastResponseKey && db.size() == freqs.size())
+        return false;
+    lastResponseKey = key;
+
+    db.assign (freqs.size(), 0.f);
+    if (pureDi.load())
+        return true;   // nothing touches the signal: the line stays flat
+
+    constexpr double sr = 48000.0;
+    constexpr int fftOrder = 13, N = 1 << fftOrder, frames = 8, settle = 8192;
+
+    berry::Tightener t; berry::HorizonGate ga; berry::ChugEnhancer ch; berry::LowOctaveBlender oc;
+    berry::ImpedanceCurve im; berry::ToneTilt ti; berry::SoundDestroyer de;
+    t.prepare (sr); ga.prepare (sr); ch.prepare (sr); oc.prepare (sr); im.prepare (sr); ti.prepare (sr); de.prepare (sr);
+    t.set  (p.tightFreq->load(), p.tightAmt->load());
+    ga.set (p.gateThresh->load(), p.gateRel->load(), p.gateDepth->load());
+    ch.set (p.chugPunch->load(), p.chugBody->load(), p.chugSpeed->load());
+    oc.set (p.octBlend->load(), p.octTone->load(), p.octTrack->load());
+    im.set (p.impFreq->load(), p.impPeak->load(), p.impLoad->load());
+    ti.set (p.tiltPivot->load(), p.tiltAmt->load());
+    de.set (p.destDrive->load(), p.destCrush->load(), p.destMix->load());
+
+    const bool en[numModules] = { p.tightOn->load() > 0.5f, p.gateOn->load() > 0.5f, p.chugOn->load() > 0.5f,
+                                  p.octOn->load() > 0.5f, p.impOn->load() > 0.5f, p.tiltOn->load() > 0.5f,
+                                  p.destOn->load() > 0.5f };
+    const auto ord = getOrder();
+    const float gi = berry::dbToLin (p.inGain->load()), go = berry::dbToLin (p.outGain->load());
+
+    juce::dsp::FFT fft (fftOrder);
+    std::vector<float> win ((size_t) N), fx ((size_t) N), fy ((size_t) N), bx ((size_t) (2 * N)), by ((size_t) (2 * N));
+    std::vector<double> px ((size_t) (N / 2 + 1), 0.0), py ((size_t) (N / 2 + 1), 0.0);
+    for (int k = 0; k < N; ++k)
+        win[(size_t) k] = 0.5f - 0.5f * std::cos (2.f * juce::MathConstants<float>::pi * (float) k / (float) N);
+
+    juce::Random rng (0x5eedbe11);   // same noise every time: the line does not flicker
+    const int total = settle + frames * N;
+    for (int i = 0; i < total; ++i)
+    {
+        const float x = (rng.nextFloat() * 2.f - 1.f) * 0.17f;   // about -20 dBFS RMS
+        float s[berry::kMaxCh] = { x * gi, 0.f };
+        for (int slot = 0; slot < numModules; ++slot)
+        {
+            const int id = ord[(size_t) slot];
+            if (! en[id]) continue;
+            switch (id)
             {
-                for (int i = 0; i < numModules; ++i) o[(size_t) i] = tokens[i].getIntValue();
-                if (isValidOrder (o)) { setOrder (o); return; }
+                case 0: t.process (s, 1);  break;
+                case 1: ga.process (s, 1); break;
+                case 2: ch.process (s, 1); break;
+                case 3: oc.process (s, 1); break;
+                case 4: im.process (s, 1); break;
+                case 5: ti.process (s, 1); break;
+                case 6: de.process (s, 1); break;
+                default: break;
             }
-            for (int i = 0; i < numModules; ++i) o[(size_t) i] = i;
-            setOrder (o);
         }
+        if (i < settle) continue;
+
+        const int k = (i - settle) % N;
+        fx[(size_t) k] = x;
+        fy[(size_t) k] = s[0] * go;
+        if (k == N - 1)
+        {
+            std::fill (bx.begin(), bx.end(), 0.f);
+            std::fill (by.begin(), by.end(), 0.f);
+            for (int j = 0; j < N; ++j) { bx[(size_t) j] = fx[(size_t) j] * win[(size_t) j]; by[(size_t) j] = fy[(size_t) j] * win[(size_t) j]; }
+            fft.performFrequencyOnlyForwardTransform (bx.data());
+            fft.performFrequencyOnlyForwardTransform (by.data());
+            for (int j = 0; j <= N / 2; ++j)
+            {
+                px[(size_t) j] += (double) bx[(size_t) j] * bx[(size_t) j];
+                py[(size_t) j] += (double) by[(size_t) j] * by[(size_t) j];
+            }
+        }
+    }
+
+    // 1/6-octave smoothing: sum the power in a band around each display frequency
+    const double binHz = sr / N, band = std::pow (2.0, 1.0 / 12.0);
+    for (size_t f = 0; f < freqs.size(); ++f)
+    {
+        const double fc = freqs[f];
+        int k0 = (int) std::ceil (fc / band / binHz), k1 = (int) std::floor (fc * band / binHz);
+        k0 = juce::jlimit (1, N / 2, k0);
+        k1 = juce::jlimit (1, N / 2, k1);
+        double ratio;
+        if (k1 - k0 >= 2)
+        {
+            double sx = 0.0, sy = 0.0;
+            for (int k = k0; k <= k1; ++k) { sx += px[(size_t) k]; sy += py[(size_t) k]; }
+            ratio = sy / juce::jmax (1.0e-12, sx);
+        }
+        else
+        {
+            // low frequencies: too few bins in the band, so interpolate between two bins (no steps)
+            const double kf = juce::jlimit (1.0, (double) (N / 2 - 1), fc / binHz);
+            const int ka = (int) kf;
+            const double frac = kf - ka;
+            auto r = [&] (int k) { return (py[(size_t) k] + py[(size_t) (k + 1)] + py[(size_t) (k - 1)])
+                                          / juce::jmax (1.0e-12, px[(size_t) k] + px[(size_t) (k + 1)] + px[(size_t) (k - 1)]); };
+            ratio = r (ka) * (1.0 - frac) + r (juce::jmin (ka + 1, N / 2 - 1)) * frac;
+        }
+        db[f] = (float) (10.0 * std::log10 (juce::jmax (1.0e-12, ratio)));
+    }
+    return true;
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
