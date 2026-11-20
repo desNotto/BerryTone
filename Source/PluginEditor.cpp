@@ -59,7 +59,7 @@ BerryToneView::BerryToneView (BerryToneAudioProcessor& p)
     styleButton (holdBtn, "hold");
     holdBtn.setClickingTogglesState (true);
     holdBtn.onClick = [this] { scope.setHold (holdBtn.getToggleState()); };
-    holdBtn.setTooltip ("Freeze the scope");
+    holdBtn.setTooltip ("Freeze the DI. The OUT line still follows the modules.");
 
     // --- presets ---
     styleButton (presetPrev, "flat");

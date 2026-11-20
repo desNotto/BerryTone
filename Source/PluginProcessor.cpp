@@ -165,6 +165,7 @@ void BerryToneAudioProcessor::prepareToPlay (double sr, int)
     pureStep = (float) (1.0 / (0.015 * sr));   // 15 ms crossfade, no clicks
     pureMix  = pureDi.load() ? 1.f : 0.f;
 
+    scopeSr = sr;
     scopeBucket = juce::jmax (1, juce::roundToInt (sr * scopeWindowSec / scopeCols));
     scopeCount = 0;
     scopeAcc = { 0.f, 0.f, 0.f, 0.f };
@@ -206,6 +207,7 @@ void BerryToneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     const float pureTarget = pureDi.load (std::memory_order_relaxed) ? 1.f : 0.f;
     const float chInv = 1.f / (float) nCh;
     int sw = scopeWrite.load (std::memory_order_relaxed);
+    int rw = rawWrite.load (std::memory_order_relaxed);
 
     for (int i = 0; i < n; ++i)
     {
@@ -254,6 +256,8 @@ void BerryToneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
         // --- DI scope: one min/max column per bucket ---
         diMono *= chInv; outMono *= chInv;
+        rawBuf[(size_t) rw].store (diMono, std::memory_order_relaxed);   // for HOLD
+        rw = (rw + 1) & (rawRing - 1);
         if (scopeCount == 0)
             scopeAcc = { diMono, diMono, outMono, outMono };
         else
@@ -276,6 +280,7 @@ void BerryToneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         }
     }
 
+    rawWrite.store (rw, std::memory_order_release);
     inPeak.store  (juce::jmax (inPeak.load(),  inPk));
     outPeak.store (juce::jmax (outPeak.load(), outPk));
     gateGain.store (gateOn ? gate.gain : 1.f);
@@ -359,10 +364,7 @@ void BerryToneAudioProcessor::readScope (std::vector<ScopeCol>& out) const
 bool BerryToneAudioProcessor::computeResponse (const std::vector<float>& freqs, std::vector<float>& db, bool force)
 {
     // Only recompute when a parameter, the order or PURE DI changed.
-    std::vector<float> key;
-    for (auto* prm : getParameters()) key.push_back (prm->getValue());
-    for (auto& o : order) key.push_back ((float) o.load());
-    key.push_back (pureDi.load() ? 1.f : 0.f);
+    auto key = chainKey();
     if (! force && key == lastResponseKey && db.size() == freqs.size())
         return false;
     lastResponseKey = key;
@@ -374,22 +376,8 @@ bool BerryToneAudioProcessor::computeResponse (const std::vector<float>& freqs, 
     constexpr double sr = 48000.0;
     constexpr int fftOrder = 13, N = 1 << fftOrder, frames = 8, settle = 8192;
 
-    berry::Tightener t; berry::HorizonGate ga; berry::ChugEnhancer ch; berry::LowOctaveBlender oc;
-    berry::ImpedanceCurve im; berry::ToneTilt ti; berry::SoundDestroyer de;
-    t.prepare (sr); ga.prepare (sr); ch.prepare (sr); oc.prepare (sr); im.prepare (sr); ti.prepare (sr); de.prepare (sr);
-    t.set  (p.tightFreq->load(), p.tightAmt->load());
-    ga.set (p.gateThresh->load(), p.gateRel->load(), p.gateDepth->load());
-    ch.set (p.chugPunch->load(), p.chugBody->load(), p.chugSpeed->load());
-    oc.set (p.octBlend->load(), p.octTone->load(), p.octTrack->load());
-    im.set (p.impFreq->load(), p.impPeak->load(), p.impLoad->load());
-    ti.set (p.tiltPivot->load(), p.tiltAmt->load());
-    de.set (p.destDrive->load(), p.destCrush->load(), p.destMix->load());
-
-    const bool en[numModules] = { p.tightOn->load() > 0.5f, p.gateOn->load() > 0.5f, p.chugOn->load() > 0.5f,
-                                  p.octOn->load() > 0.5f, p.impOn->load() > 0.5f, p.tiltOn->load() > 0.5f,
-                                  p.destOn->load() > 0.5f };
-    const auto ord = getOrder();
-    const float gi = berry::dbToLin (p.inGain->load()), go = berry::dbToLin (p.outGain->load());
+    auto chain = makeOfflineChain (sr);
+    const float go = chain->go;
 
     juce::dsp::FFT fft (fftOrder);
     std::vector<float> win ((size_t) N), fx ((size_t) N), fy ((size_t) N), bx ((size_t) (2 * N)), by ((size_t) (2 * N));
@@ -402,28 +390,12 @@ bool BerryToneAudioProcessor::computeResponse (const std::vector<float>& freqs, 
     for (int i = 0; i < total; ++i)
     {
         const float x = (rng.nextFloat() * 2.f - 1.f) * 0.17f;   // about -20 dBFS RMS
-        float s[berry::kMaxCh] = { x * gi, 0.f };
-        for (int slot = 0; slot < numModules; ++slot)
-        {
-            const int id = ord[(size_t) slot];
-            if (! en[id]) continue;
-            switch (id)
-            {
-                case 0: t.process (s, 1);  break;
-                case 1: ga.process (s, 1); break;
-                case 2: ch.process (s, 1); break;
-                case 3: oc.process (s, 1); break;
-                case 4: im.process (s, 1); break;
-                case 5: ti.process (s, 1); break;
-                case 6: de.process (s, 1); break;
-                default: break;
-            }
-        }
+        const float y = chain->process (x);
         if (i < settle) continue;
 
         const int k = (i - settle) % N;
         fx[(size_t) k] = x;
-        fy[(size_t) k] = s[0] * go;
+        fy[(size_t) k] = y * go;
         if (k == N - 1)
         {
             std::fill (bx.begin(), bx.end(), 0.f);
@@ -467,6 +439,99 @@ bool BerryToneAudioProcessor::computeResponse (const std::vector<float>& freqs, 
         db[f] = (float) (10.0 * std::log10 (juce::jmax (1.0e-12, ratio)));
     }
     return true;
+}
+
+//==============================================================================
+std::vector<float> BerryToneAudioProcessor::chainKey()
+{
+    std::vector<float> key;
+    for (auto* prm : getParameters()) key.push_back (prm->getValue());
+    for (auto& o : order) key.push_back ((float) o.load());
+    key.push_back (pureDi.load() ? 1.f : 0.f);
+    return key;
+}
+
+std::unique_ptr<BerryToneAudioProcessor::OfflineChain> BerryToneAudioProcessor::makeOfflineChain (double sr) const
+{
+    auto c = std::make_unique<OfflineChain>();
+    c->t.prepare (sr); c->ga.prepare (sr); c->ch.prepare (sr); c->oc.prepare (sr);
+    c->im.prepare (sr); c->ti.prepare (sr); c->de.prepare (sr);
+    c->t.set  (p.tightFreq->load(), p.tightAmt->load());
+    c->ga.set (p.gateThresh->load(), p.gateRel->load(), p.gateDepth->load());
+    c->ch.set (p.chugPunch->load(), p.chugBody->load(), p.chugSpeed->load());
+    c->oc.set (p.octBlend->load(), p.octTone->load(), p.octTrack->load());
+    c->im.set (p.impFreq->load(), p.impPeak->load(), p.impLoad->load());
+    c->ti.set (p.tiltPivot->load(), p.tiltAmt->load());
+    c->de.set (p.destDrive->load(), p.destCrush->load(), p.destMix->load());
+
+    c->en[0] = p.tightOn->load() > 0.5f; c->en[1] = p.gateOn->load() > 0.5f; c->en[2] = p.chugOn->load() > 0.5f;
+    c->en[3] = p.octOn->load()   > 0.5f; c->en[4] = p.impOn->load()  > 0.5f; c->en[5] = p.tiltOn->load() > 0.5f;
+    c->en[6] = p.destOn->load()  > 0.5f;
+    for (size_t i = 0; i < c->ord.size(); ++i) c->ord[i] = order[i].load();
+    c->gi = berry::dbToLin (p.inGain->load());
+    c->go = berry::dbToLin (p.outGain->load());
+    return c;
+}
+
+float BerryToneAudioProcessor::OfflineChain::process (float x)
+{
+    float s[berry::kMaxCh] = { x * gi, 0.f };
+    for (int slot = 0; slot < numModules; ++slot)
+    {
+        const int id = ord[(size_t) slot];
+        if (! en[id]) continue;
+        switch (id)
+        {
+            case 0: t.process (s, 1);  break;
+            case 1: ga.process (s, 1); break;
+            case 2: ch.process (s, 1); break;
+            case 3: oc.process (s, 1); break;
+            case 4: im.process (s, 1); break;
+            case 5: ti.process (s, 1); break;
+            case 6: de.process (s, 1); break;
+            default: break;
+        }
+    }
+    return s[0];
+}
+
+void BerryToneAudioProcessor::readRawDi (std::vector<float>& target, int numSamples) const
+{
+    numSamples = juce::jlimit (1, rawRing, numSamples);
+    target.resize ((size_t) numSamples);
+    const int w = rawWrite.load (std::memory_order_acquire);
+    for (int i = 0; i < numSamples; ++i)
+        target[(size_t) i] = rawBuf[(size_t) ((w - numSamples + i + rawRing) & (rawRing - 1))].load (std::memory_order_relaxed);
+}
+
+void BerryToneAudioProcessor::renderHeld (const std::vector<float>& raw, double sr, int warmUp, std::vector<ScopeCol>& target) const
+{
+    target.assign ((size_t) scopeCols, { 0.f, 0.f, 0.f, 0.f });
+    const int n = (int) raw.size();
+    warmUp = juce::jlimit (0, n, warmUp);
+    const int shown = n - warmUp;
+    if (shown <= 0) return;
+
+    const bool pure = pureDi.load();
+    auto chain = makeOfflineChain (sr);
+    for (int i = 0; i < warmUp; ++i)          // the filters and envelopes settle first
+        chain->process (raw[(size_t) i]);
+
+    int lastCol = -1;
+    for (int i = 0; i < shown; ++i)
+    {
+        const float di = raw[(size_t) (warmUp + i)];
+        const float y = chain->process (di) * chain->go;
+        const float out = pure ? di : y;
+        const int col = juce::jmin (scopeCols - 1, (int) ((juce::int64) i * scopeCols / shown));
+        auto& c = target[(size_t) col];
+        if (col != lastCol) { c = { di, di, out, out }; lastCol = col; }
+        else
+        {
+            c.diMin  = juce::jmin (c.diMin, di);   c.diMax  = juce::jmax (c.diMax, di);
+            c.outMin = juce::jmin (c.outMin, out); c.outMax = juce::jmax (c.outMax, out);
+        }
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

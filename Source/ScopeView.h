@@ -16,7 +16,8 @@ public:
     void setDesign (Design d) { design = d; repaint(); }
     void setMode (Mode);
     Mode getMode() const { return mode; }
-    void setHold (bool h) { hold = h; }
+    // HOLD (REAL DI): freezes the DI; the OUT line still follows the modules.
+    void setHold (bool);
 
     void paint (juce::Graphics&) override;
 
@@ -24,6 +25,9 @@ private:
     void timerCallback() override;
     void paintReal (juce::Graphics&, juce::Rectangle<float>);
     void paintFlat (juce::Graphics&, juce::Rectangle<float>);
+    void captureHeld();
+    void renderHeld();
+    void updateLevel (bool smooth);
     void drawBox (juce::Graphics&, juce::Rectangle<float>, const juce::String&, juce::Justification, juce::Colour);
 
     BerryToneAudioProcessor& proc;
@@ -36,4 +40,9 @@ private:
     float scale = 0.25f;      // auto level: amplitude at the top of the screen
     float inPeakDb = -100.f;
     int tick = 0;
+
+    // HOLD: the frozen raw DI (warm-up + 1 s) and the chain key of the last render
+    std::vector<float> heldRaw, heldKey;
+    double heldSr = 48000.0;
+    int heldWarm = 0;
 };

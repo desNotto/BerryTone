@@ -113,7 +113,30 @@ public:
     // Message thread only. Returns false when nothing changed since the last call.
     bool computeResponse (const std::vector<float>& freqsHz, std::vector<float>& dbOut, bool force = false);
 
+    // ---- HOLD ----------------------------------------------------------------
+    // The audio thread keeps the newest raw DI samples (mono, before the input trim).
+    // HOLD copies them once; then renderHeld() sends that DI through a copy of the
+    // current chain each time a module changes, so the held picture stays live.
+    // Message thread only.
+    double getScopeSampleRate() const { return scopeSr.load(); }
+    void readRawDi (std::vector<float>& dest, int numSamples) const;
+    void renderHeld (const std::vector<float>& rawDi, double sr, int warmUp, std::vector<ScopeCol>& dest) const;
+    // Parameters + order + PURE DI. Changes when anything that touches the signal changes.
+    std::vector<float> chainKey();
+
 private:
+    // An offline copy of the chain with the current settings (message thread).
+    struct OfflineChain
+    {
+        berry::Tightener t; berry::HorizonGate ga; berry::ChugEnhancer ch; berry::LowOctaveBlender oc;
+        berry::ImpedanceCurve im; berry::ToneTilt ti; berry::SoundDestroyer de;
+        bool en[numModules] {};
+        std::array<int, numModules> ord {};
+        float gi = 1.f, go = 1.f;
+        float process (float x);   // input trim + modules (no output trim)
+    };
+    std::unique_ptr<OfflineChain> makeOfflineChain (double sr) const;
+
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     static bool isValidOrder (const std::array<int, numModules>&);
     std::array<std::atomic<int>, numModules> order;
@@ -150,6 +173,12 @@ private:
     ScopeCol scopeAcc { 0.f, 0.f, 0.f, 0.f };
 
     std::vector<float> lastResponseKey;
+
+    // raw DI ring for HOLD (lock-free: relaxed atomics, one writer)
+    static constexpr int rawRing = 1 << 18;   // 262144 samples: 1 s + warm-up at up to 192 kHz
+    std::vector<std::atomic<float>> rawBuf = std::vector<std::atomic<float>> ((size_t) rawRing);
+    std::atomic<int> rawWrite { 0 };
+    std::atomic<double> scopeSr { 48000.0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BerryToneAudioProcessor)
 };

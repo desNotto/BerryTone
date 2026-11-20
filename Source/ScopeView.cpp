@@ -24,27 +24,66 @@ void ScopeView::setMode (Mode m)
     mode = m;
     if (mode == Mode::flat)
         proc.computeResponse (freqs, resp, true);
+    else if (hold)
+        captureHeld();
     repaint();
+}
+
+void ScopeView::setHold (bool h)
+{
+    hold = h;
+    if (hold && mode == Mode::real)
+        captureHeld();
+}
+
+void ScopeView::captureHeld()
+{
+    heldSr = proc.getScopeSampleRate();
+    heldWarm = juce::roundToInt (heldSr * 0.3);   // 300 ms for the filters and envelopes to settle
+    proc.readRawDi (heldRaw, heldWarm + juce::roundToInt (heldSr * BerryToneAudioProcessor::scopeWindowSec));
+    renderHeld();
+    updateLevel (false);
+    repaint();
+}
+
+void ScopeView::renderHeld()
+{
+    heldKey = proc.chainKey();
+    proc.renderHeld (heldRaw, heldSr, heldWarm, cols);
+}
+
+void ScopeView::updateLevel (bool smooth)
+{
+    float pk = 0.f, inPk = 0.f;
+    for (auto& c : cols)
+    {
+        pk = juce::jmax (pk, -c.diMin, c.diMax, juce::jmax (-c.outMin, c.outMax));
+        inPk = juce::jmax (inPk, -c.diMin, c.diMax);
+    }
+    // auto level: fast up, slow down. Same scale for DI and OUT.
+    const float target = juce::jmax (0.02f, pk * 1.15f);
+    scale = (! smooth || target > scale) ? target : scale + (target - scale) * 0.03f;
+    inPeakDb = juce::Decibels::gainToDecibels (inPk, -100.f);
 }
 
 void ScopeView::timerCallback()
 {
     ++tick;
-    if (hold) return;
 
-    if (mode == Mode::real)
+    if (mode == Mode::real && hold)
+    {
+        // the DI stays frozen; the modules may change: render the OUT line again
+        if ((tick & 1) == 0 && proc.chainKey() != heldKey)
+        {
+            renderHeld();
+            updateLevel (true);    // grows at once, shrinks slowly: the DI line keeps its size
+            repaint();
+        }
+    }
+    else if (mode == Mode::real)
     {
         proc.readScope (cols);
-        float pk = 0.f, inPk = 0.f;
-        for (auto& c : cols)
-        {
-            pk = juce::jmax (pk, -c.diMin, c.diMax, juce::jmax (-c.outMin, c.outMax));
-            inPk = juce::jmax (inPk, -c.diMin, c.diMax);
-        }
-        // auto level: fast up, slow down. Same scale for DI and OUT.
-        const float target = juce::jmax (0.02f, pk * 1.15f);
-        scale = target > scale ? target : scale + (target - scale) * 0.03f;
-        inPeakDb = juce::Decibels::gainToDecibels (inPk, -100.f);
+        updateLevel (true);
         repaint();
     }
     else if ((tick & 1) == 0)   // 15 updates per second are enough for the curve

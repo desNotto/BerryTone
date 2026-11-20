@@ -3,6 +3,10 @@
 A pre-amp-sim conditioner for low-tuned guitar (7/8-string, drop tunings, baritone). VST3 (+ AU on macOS). No Standalone build. JUCE 8 / C++17.
 Author: **desNotto**.
 
+## What is new in 1.1.2
+- **Live HOLD.** HOLD freezes the DI (REAL DI mode). The coloured OUT line still follows the modules: turn a knob and see the change on the held DI at once. PURE DI works on the held picture too.
+- New factory preset **9 string crunch** (Grape design). A user preset file with a factory name is hidden; the factory preset wins.
+
 ## What is new in 1.1.1
 - The Windows release has `BerryTone.vst3` as one file. DAWs that did not find the 1.1.0 bundle folder now find the plugin.
 - No Standalone build.
@@ -14,7 +18,7 @@ Author: **desNotto**.
 - **DI Scope.** A window above the modules shows your signal in real time.
   - **REAL DI:** the grey line is the raw DI. The coloured line is the signal after the modules. One screen = 1 second, auto level.
   - **FLAT LINE:** a test signal with a flat spectrum goes through the chain. The modules bend the flat line (gain in dB, 20 Hz - 20 kHz).
-  - **HOLD** freezes the screen.
+  - **HOLD** freezes the DI. The OUT line still follows the modules.
 - **PURE DI button.** It mutes all modules (and the trims). You hear and see the raw DI. Click again to go back. It does not change your settings.
 - **Two designs.** Click the logo. **Berry** (juice box) changes to **Grape** (dark, from the UI sheet) and back.
 - **Presets.** Use the bar at the top: previous / next, the list, Save, Save as, Rename, Delete.

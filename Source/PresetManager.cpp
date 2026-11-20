@@ -23,6 +23,18 @@ namespace
               { ID::impOn, 1.f },           { ID::impFreq, 4600.f },    { ID::impPeak, 0.75f },  { ID::impLoad, 0.4f },
               { ID::tiltOn, 1.f },          { ID::tiltAmt, 8.f },       { ID::tiltPivot, 600.f },
               { ID::destOn, 0.f },          { ID::destDrive, 0.92f },   { ID::destCrush, 0.23f }, { ID::destMix, 0.95f }
+          } },
+        // From the user preset file "9 string crunch.btpreset" (v1.1.1).
+        { "9 string crunch", Design::grape,
+          {
+              { ID::inGain, 0.f },          { ID::outGain, 0.f },
+              { ID::tightOn, 1.f },         { ID::tightFreq, 99.52f },  { ID::tightAmt, 1.f },
+              { ID::gateOn, 0.f },          { ID::gateThresh, -55.f },  { ID::gateRel, 80.f },   { ID::gateDepth, -70.f },
+              { ID::chugOn, 0.f },          { ID::chugPunch, 0.3f },    { ID::chugBody, 0.f },   { ID::chugSpeed, 2.f },
+              { ID::octOn, 0.f },           { ID::octBlend, 0.884f },   { ID::octTone, 109.71f }, { ID::octTrack, 498.93f },
+              { ID::impOn, 1.f },           { ID::impFreq, 4600.94f },  { ID::impPeak, 0.748f }, { ID::impLoad, 0.4f },
+              { ID::tiltOn, 1.f },          { ID::tiltAmt, 8.f },       { ID::tiltPivot, 600.f },
+              { ID::destOn, 0.f },          { ID::destDrive, 0.916f },  { ID::destCrush, 0.228f }, { ID::destMix, 0.948f }
           } }
     };
     constexpr int numFactory = (int) (sizeof (factory) / sizeof (factory[0]));
@@ -59,6 +71,10 @@ void PresetManager::refresh()
     for (const auto& f : getUserDir().findChildFiles (juce::File::findFiles, false, juce::String ("*") + fileExt))
     {
         Entry e { f.getFileNameWithoutExtension(), false, -1, f, Design::berry };
+        bool sameAsFactory = false;   // a user file with a factory name: the factory preset wins
+        for (int i = 0; i < numFactory; ++i)
+            sameAsFactory = sameAsFactory || e.name.equalsIgnoreCase (factory[i].name);
+        if (sameAsFactory) continue;
         if (auto xml = juce::XmlDocument::parse (f))
             e.design = xml->getStringAttribute ("design") == "grape" ? Design::grape : Design::berry;
         user.push_back (e);

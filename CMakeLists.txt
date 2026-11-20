@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 # The version lives here. Release builds can override it: -DBERRY_VERSION=x.y.z
 if(NOT DEFINED BERRY_VERSION)
-    set(BERRY_VERSION 1.1.1)
+    set(BERRY_VERSION 1.1.2)
 endif()
 project(BerryTone VERSION ${BERRY_VERSION})
 
