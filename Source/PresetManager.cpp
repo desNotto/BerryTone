@@ -10,19 +10,15 @@ namespace
         std::initializer_list<std::pair<const char*, float>> values;
     };
 
-    // Preset 1 "Berry Base" = the settings from preset.jpg.
+    // A factory preset first resets every parameter to its default, then sets its values.
+    // Preset 1 "Init" is the first-launch preset: all modules off, the knobs at their defaults.
     const FactoryPreset factory[] =
     {
-        { "Berry Base", Design::berry,
+        { "Init", Design::berry,
           {
-              { ID::inGain, 0.f },          { ID::outGain, 0.f },
-              { ID::tightOn, 1.f },         { ID::tightFreq, 100.f },   { ID::tightAmt, 1.f },
-              { ID::gateOn, 0.f },          { ID::gateThresh, -55.f },  { ID::gateRel, 80.f },   { ID::gateDepth, -70.f },
-              { ID::chugOn, 0.f },          { ID::chugPunch, 0.3f },    { ID::chugBody, 0.f },   { ID::chugSpeed, 2.f },
-              { ID::octOn, 0.f },           { ID::octBlend, 0.88f },    { ID::octTone, 110.f },  { ID::octTrack, 499.f },
-              { ID::impOn, 1.f },           { ID::impFreq, 4600.f },    { ID::impPeak, 0.75f },  { ID::impLoad, 0.4f },
-              { ID::tiltOn, 1.f },          { ID::tiltAmt, 8.f },       { ID::tiltPivot, 600.f },
-              { ID::destOn, 0.f },          { ID::destDrive, 0.92f },   { ID::destCrush, 0.23f }, { ID::destMix, 0.95f }
+              { ID::tightOn, 0.f }, { ID::gateOn, 0.f }, { ID::chugOn, 0.f }, { ID::octOn, 0.f },
+              { ID::impOn, 0.f },   { ID::tiltOn, 0.f }, { ID::destOn, 0.f },
+              { ID::inGain, 0.f },  { ID::outGain, 0.f }
           } },
         // From the user preset file "9 string crunch.btpreset" (v1.1.1).
         { "9 string crunch", Design::grape,
@@ -123,6 +119,9 @@ void PresetManager::setCurrent (const juce::String& name, bool isFactory)
 void PresetManager::applyFactory (int index)
 {
     const auto& fp = factory[index];
+    for (auto* prm : proc.getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
+            rp->setValueNotifyingHost (rp->getDefaultValue());
     for (auto& kv : fp.values)
         if (auto* prm = proc.apvts.getParameter (kv.first))
             prm->setValueNotifyingHost (prm->convertTo0to1 (kv.second));
@@ -262,5 +261,14 @@ void PresetManager::syncFromState()
     refresh();
     curName = proc.apvts.state.getProperty ("presetName", "").toString();
     curFactory = (bool) proc.apvts.state.getProperty ("presetFactory", false);
+
+    // a session from an older version may name a factory preset that is gone (e.g. "Berry Base")
+    if (curFactory)
+    {
+        bool exists = false;
+        for (int i = 0; i < numFactory; ++i)
+            exists = exists || curName == factory[i].name;
+        if (! exists) { curName = {}; curFactory = false; }
+    }
     loadedSnapshot = snapshot();
 }

@@ -119,8 +119,8 @@ public:
     // current chain each time a module changes, so the held picture stays live.
     // Message thread only.
     double getScopeSampleRate() const { return scopeSr.load(); }
-    void readRawDi (std::vector<float>& dest, int numSamples) const;
-    void renderHeld (const std::vector<float>& rawDi, double sr, int warmUp, std::vector<ScopeCol>& dest) const;
+    void readRawDi (std::vector<float>& target, int numSamples) const;
+    void renderHeld (const std::vector<float>& rawDi, double sr, int warmUp, std::vector<ScopeCol>& target) const;
     // Parameters + order + PURE DI. Changes when anything that touches the signal changes.
     std::vector<float> chainKey();
 

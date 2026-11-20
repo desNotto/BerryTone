@@ -95,9 +95,15 @@ int main (int argc, char** argv)
             ed.reset();
         }
 
-    // preset list
+    // preset list + first-launch preset
     BerryToneAudioProcessor proc;
     for (auto& e : proc.presets.getEntries())
         std::printf ("preset: %s%s\n", e.name.toRawUTF8(), e.factory ? " (factory)" : "");
-    return holdResult;
+    int onCount = 0;
+    for (auto* id : { ID::tightOn, ID::gateOn, ID::chugOn, ID::octOn, ID::impOn, ID::tiltOn, ID::destOn })
+        onCount += proc.apvts.getRawParameterValue (id)->load() > 0.5f ? 1 : 0;
+    std::printf ("first launch: preset '%s', modules on: %d, design %s, modified %s\n",
+                 proc.presets.getCurrentName().toRawUTF8(), onCount,
+                 proc.getDesign() == Design::grape ? "grape" : "berry", proc.presets.isModified() ? "yes" : "no");
+    return (holdResult == 0 && onCount == 0) ? 0 : 1;
 }

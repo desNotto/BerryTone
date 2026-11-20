@@ -5,6 +5,7 @@ Author: **desNotto**.
 
 ## What is new in 1.1.2
 - **Live HOLD.** HOLD freezes the DI (REAL DI mode). The coloured OUT line still follows the modules: turn a knob and see the change on the held DI at once. PURE DI works on the held picture too.
+- The first preset is now **Init**: all modules off. A new instance starts with it. **Berry Base** is removed.
 - New factory preset **9 string crunch** (Grape design). A user preset file with a factory name is hidden; the factory preset wins.
 
 ## What is new in 1.1.1
@@ -23,7 +24,7 @@ Author: **desNotto**.
 - **Two designs.** Click the logo. **Berry** (juice box) changes to **Grape** (dark, from the UI sheet) and back.
 - **Presets.** Use the bar at the top: previous / next, the list, Save, Save as, Rename, Delete.
   - A preset stores all knobs, switches, the module order and the design.
-  - Factory preset **Berry Base** is read only. A new instance starts with it.
+  - Factory presets are read only. A new instance starts with **Init**: all modules off, the knobs at their defaults.
   - User presets are files in `%APPDATA%\desNotto\BerryTone\Presets` (`*.btpreset`). The menu has "Open presets folder".
 - **Updates from GitHub.** The plugin reads the latest release of this repository. When a newer version exists, the button "Update to vX" shows at the bottom left. Install downloads the zip and replaces the plugin files (Windows asks for admin rights when the folder needs them). Restart the DAW after the install.
 - **Low Freq Tightener:** the Tight range is now 0-300% (was 0-100%).
