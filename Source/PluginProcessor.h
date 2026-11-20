@@ -89,6 +89,9 @@ public:
     Design getDesign() const;
     void setDesign (Design);
 
+    // Window scale (1 = 940 x 700). Saved with the session, not with presets.
+    std::atomic<float> uiScale { 1.f };
+
     // PURE DI: mutes all modules (and the trims). Monitoring only, not saved.
     std::atomic<bool> pureDi { false };
 

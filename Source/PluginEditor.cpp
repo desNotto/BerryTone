@@ -5,8 +5,8 @@ using F = ThemeLookAndFeel;
 using juce::Colour;
 
 //==============================================================================
-BerryToneAudioProcessorEditor::BerryToneAudioProcessorEditor (BerryToneAudioProcessor& p)
-    : AudioProcessorEditor (&p), proc (p), scope (p)
+BerryToneView::BerryToneView (BerryToneAudioProcessor& p)
+    : proc (p), scope (p)
 {
     setLookAndFeel (&lnf);
 
@@ -94,16 +94,26 @@ BerryToneAudioProcessorEditor::BerryToneAudioProcessorEditor (BerryToneAudioProc
         applyOrder();
     };
 
+    // window size: 100 % / 125 %. The window edge gives any size in between.
+    styleButton (size100, "size");
+    styleButton (size125, "size");
+    size100.setConnectedEdges (juce::Button::ConnectedOnRight);
+    size125.setConnectedEdges (juce::Button::ConnectedOnLeft);
+    size100.setTooltip ("Window size 100%");
+    size125.setTooltip ("Window size 125%. Drag the window edge for other sizes.");
+    size100.onClick = [this] { if (onScaleRequest) onScaleRequest (1.0f); };
+    size125.onClick = [this] { if (onScaleRequest) onScaleRequest (1.25f); };
+
     checker->checkOnce();
 
-    setSize (940, 700);
+    setSize (designW, designH);
     applyDesign (proc.getDesign());
     updatePresetLabel();
     startTimerHz (30);
     timerCallback();
 }
 
-BerryToneAudioProcessorEditor::~BerryToneAudioProcessorEditor()
+BerryToneView::~BerryToneView()
 {
     stopTimer();
     for (int i = getNumChildComponents(); --i >= 0;)
@@ -116,13 +126,13 @@ BerryToneAudioProcessorEditor::~BerryToneAudioProcessorEditor()
     setLookAndFeel (nullptr);
 }
 
-void BerryToneAudioProcessorEditor::styleButton (juce::Button& b, const juce::String& style)
+void BerryToneView::styleButton (juce::Button& b, const juce::String& style)
 {
     b.getProperties().set ("style", style);
     addAndMakeVisible (b);
 }
 
-BerryToneAudioProcessorEditor::Module& BerryToneAudioProcessorEditor::addModule (
+BerryToneView::Module& BerryToneView::addModule (
     const juce::String& title, const juce::String& flavor, const char* onId,
     std::initializer_list<std::pair<const char*, const char*>> knobs)
 {
@@ -156,7 +166,7 @@ BerryToneAudioProcessorEditor::Module& BerryToneAudioProcessorEditor::addModule 
 }
 
 //==============================================================================
-void BerryToneAudioProcessorEditor::applyDesign (Design d)
+void BerryToneView::applyDesign (Design d)
 {
     design = d;
     lnf.setDesign (d);
@@ -164,9 +174,17 @@ void BerryToneAudioProcessorEditor::applyDesign (Design d)
     sendLookAndFeelChange();   // slider text boxes pick up the new colours
     resized();
     repaint();
+    if (auto* parent = getParentComponent())
+        parent->repaint();     // the corner resizer uses the same look
 }
 
-void BerryToneAudioProcessorEditor::resized()
+void BerryToneView::setCurrentScale (float s)
+{
+    size100.setToggleState (std::abs (s - 1.0f)  < 0.01f, juce::dontSendNotification);
+    size125.setToggleState (std::abs (s - 1.25f) < 0.01f, juce::dontSendNotification);
+}
+
+void BerryToneView::resized()
 {
     const bool grape = design == Design::grape;
 
@@ -202,6 +220,8 @@ void BerryToneAudioProcessorEditor::resized()
     // footer
     updateBtn.setBounds (72, 662, grape ? 140 : 128, grape ? 22 : 20);
     resetBtn.setBounds (getWidth() - 22 - 96, 663, 96, grape ? 22 : 20);
+    size100.setBounds (722, grape ? 663 : 664, 46, grape ? 22 : 20);
+    size125.setBounds (768, grape ? 663 : 664, 46, grape ? 22 : 20);
 
     // module cards
     for (auto& mp : modules)
@@ -239,20 +259,20 @@ void BerryToneAudioProcessorEditor::resized()
 }
 
 //==============================================================================
-juce::Rectangle<int> BerryToneAudioProcessorEditor::slotRect (int slot) const
+juce::Rectangle<int> BerryToneView::slotRect (int slot) const
 {
     const int margin = 22, gap = 12, top = 266, cardH = 186, cols = 4;
     const int cardW = (getWidth() - 2 * margin - (cols - 1) * gap) / cols;
     return { margin + (slot % cols) * (cardW + gap), top + (slot / cols) * (cardH + gap), cardW, cardH };
 }
 
-int BerryToneAudioProcessorEditor::slotOf (int id) const
+int BerryToneView::slotOf (int id) const
 {
     if (id >= 7) return 7;   // master card is fixed
     return (int) (std::find (order.begin(), order.end(), id) - order.begin());
 }
 
-int BerryToneAudioProcessorEditor::moduleAtHeader (juce::Point<int> p) const
+int BerryToneView::moduleAtHeader (juce::Point<int> p) const
 {
     for (auto& m : modules)
         if (! m->isMaster && m->bounds.withHeight (46).withTrimmedRight (72).contains (p))
@@ -260,14 +280,14 @@ int BerryToneAudioProcessorEditor::moduleAtHeader (juce::Point<int> p) const
     return -1;
 }
 
-void BerryToneAudioProcessorEditor::applyOrder()
+void BerryToneView::applyOrder()
 {
     proc.setOrder (order);
     resized();
     repaint();
 }
 
-void BerryToneAudioProcessorEditor::mouseMove (const juce::MouseEvent& e)
+void BerryToneView::mouseMove (const juce::MouseEvent& e)
 {
     const auto pos = e.getPosition();
     if (logoRect.contains (pos))                setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -275,7 +295,7 @@ void BerryToneAudioProcessorEditor::mouseMove (const juce::MouseEvent& e)
     else                                        setMouseCursor (juce::MouseCursor::NormalCursor);
 }
 
-void BerryToneAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
+void BerryToneView::mouseDown (const juce::MouseEvent& e)
 {
     if (logoRect.contains (e.getPosition()))
     {
@@ -290,7 +310,7 @@ void BerryToneAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
     if (dragId >= 0) repaint();
 }
 
-void BerryToneAudioProcessorEditor::mouseDrag (const juce::MouseEvent& e)
+void BerryToneView::mouseDrag (const juce::MouseEvent& e)
 {
     if (dragId < 0) return;
     const auto pos = e.getPosition();
@@ -310,13 +330,13 @@ void BerryToneAudioProcessorEditor::mouseDrag (const juce::MouseEvent& e)
     }
 }
 
-void BerryToneAudioProcessorEditor::mouseUp (const juce::MouseEvent&)
+void BerryToneView::mouseUp (const juce::MouseEvent&)
 {
     if (dragId >= 0) { dragId = -1; repaint(); }
 }
 
 //==============================================================================
-void BerryToneAudioProcessorEditor::drawTube (juce::Graphics& g, juce::Rectangle<float> r, float level, const juce::String& name)
+void BerryToneView::drawTube (juce::Graphics& g, juce::Rectangle<float> r, float level, const juce::String& name)
 {
     using namespace berrycol;
     g.setColour (deep.withAlpha (0.88f));
@@ -339,7 +359,7 @@ void BerryToneAudioProcessorEditor::drawTube (juce::Graphics& g, juce::Rectangle
     g.drawText (name, (int) r.getX() - 6, (int) r.getBottom() + 3, (int) r.getWidth() + 12, 12, juce::Justification::centred);
 }
 
-void BerryToneAudioProcessorEditor::drawLeds (juce::Graphics& g, juce::Rectangle<float> r, float level, const juce::String& name)
+void BerryToneView::drawLeds (juce::Graphics& g, juce::Rectangle<float> r, float level, const juce::String& name)
 {
     using namespace grapecol;
     g.setColour (screen);
@@ -369,14 +389,14 @@ void BerryToneAudioProcessorEditor::drawLeds (juce::Graphics& g, juce::Rectangle
     g.drawText (name, (int) r.getX() - 8, (int) r.getBottom() + 3, (int) r.getWidth() + 16, 12, juce::Justification::centred);
 }
 
-void BerryToneAudioProcessorEditor::paint (juce::Graphics& g)
+void BerryToneView::paint (juce::Graphics& g)
 {
     if (design == Design::grape) paintGrape (g);
     else                         paintBerry (g);
 }
 
 //==============================================================================
-void BerryToneAudioProcessorEditor::paintBerry (juce::Graphics& g)
+void BerryToneView::paintBerry (juce::Graphics& g)
 {
     using namespace berrycol;
     const float w = (float) getWidth(), h = (float) getHeight();
@@ -416,8 +436,8 @@ void BerryToneAudioProcessorEditor::paintBerry (juce::Graphics& g)
 
     g.setFont (F::font (11.f));
     g.setColour (cream.withAlpha (0.85f));
-    g.drawText ("100% PURE SIGNAL  -  LOW-TUNED GUITAR JUICER  -  0 SAMPLES LATENCY",
-                112, 84, 520, 14, juce::Justification::centredLeft);
+    g.drawText ("LOW-TUNED GUITAR JUICER  -  0 SAMPLES LATENCY",      // ends before the preset bar (x 474)
+                112, 84, 350, 14, juce::Justification::centredLeft);
 
     // --- preset bar ---
     {
@@ -530,12 +550,12 @@ void BerryToneAudioProcessorEditor::paintBerry (juce::Graphics& g)
     g.setFont (F::font (10.5f));
     g.setColour (cream.withAlpha (0.6f));
     g.drawText ("v" JucePlugin_VersionString, 22, 663, 48, 20, juce::Justification::centredLeft);
-    g.drawText ("DRAG A CARD HEADER TO REORDER  -  CLICK THE LOGO TO CHANGE THE LOOK",
-                220, 663, 500, 20, juce::Justification::centred);
+    g.drawFittedText ("DRAG A CARD HEADER TO REORDER  -  CLICK THE LOGO TO CHANGE THE LOOK",
+                      216, 663, 496, 20, juce::Justification::centred, 1, 0.9f);
 }
 
 //==============================================================================
-void BerryToneAudioProcessorEditor::paintGrape (juce::Graphics& g)
+void BerryToneView::paintGrape (juce::Graphics& g)
 {
     using namespace grapecol;
     const float w = (float) getWidth(), h = (float) getHeight();
@@ -565,8 +585,8 @@ void BerryToneAudioProcessorEditor::paintGrape (juce::Graphics& g)
     }
     g.setFont (F::font (10.5f, true, 0.1f));
     g.setColour (flavor);
-    g.drawText ("BERRYTONE  -  LOW-TUNED GUITAR CONDITIONER  -  0 SAMPLES LATENCY",
-                104, 84, 480, 14, juce::Justification::centredLeft);
+    g.drawText ("LOW-TUNED CONDITIONER  -  0 SAMPLES LATENCY",        // ends before the preset bar (x 474)
+                104, 84, 360, 14, juce::Justification::centredLeft);
 
     // --- preset bar ---
     {
@@ -699,12 +719,12 @@ void BerryToneAudioProcessorEditor::paintGrape (juce::Graphics& g)
     g.drawText ("v" JucePlugin_VersionString, 22, 663, 48, 22, juce::Justification::centredLeft);
     g.setColour (dim);
     g.setFont (F::font (10.f, true, 0.1f));
-    g.drawText ("DRAG A PANEL HEADER TO REORDER  -  CLICK THE LOGO TO CHANGE THE LOOK",
-                210, 663, 520, 22, juce::Justification::centred);
+    g.drawFittedText ("DRAG A PANEL HEADER TO REORDER  -  CLICK THE LOGO TO CHANGE THE LOOK",
+                      216, 663, 496, 22, juce::Justification::centred, 1, 0.9f);
 }
 
 //==============================================================================
-void BerryToneAudioProcessorEditor::timerCallback()
+void BerryToneView::timerCallback()
 {
     auto norm = [] (float lin)
     {
@@ -770,7 +790,7 @@ void BerryToneAudioProcessorEditor::timerCallback()
 
 //==============================================================================
 // Presets
-void BerryToneAudioProcessorEditor::updatePresetLabel()
+void BerryToneView::updatePresetLabel()
 {
     auto t = proc.presets.getCurrentName();
     if (proc.presets.isModified()) t << " *";
@@ -785,7 +805,7 @@ void BerryToneAudioProcessorEditor::updatePresetLabel()
     deleteBtn.setEnabled (user);
 }
 
-void BerryToneAudioProcessorEditor::showPresetMenu()
+void BerryToneView::showPresetMenu()
 {
     auto& pm = proc.presets;
     pm.refresh();
@@ -821,7 +841,7 @@ void BerryToneAudioProcessorEditor::showPresetMenu()
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&presetName).withParentComponent (this)
                                                   .withMinimumWidth (presetName.getWidth()),
-                        [safe = SafePointer<BerryToneAudioProcessorEditor> (this)] (int r)
+                        [safe = SafePointer<BerryToneView> (this)] (int r)
     {
         if (safe == nullptr || r == 0) return;
         if (r == 10000)
@@ -836,7 +856,7 @@ void BerryToneAudioProcessorEditor::showPresetMenu()
     });
 }
 
-void BerryToneAudioProcessorEditor::savePreset()
+void BerryToneView::savePreset()
 {
     auto& pm = proc.presets;
     if (pm.currentIsFactory() || pm.getCurrentIndex() < 0)
@@ -849,7 +869,7 @@ void BerryToneAudioProcessorEditor::savePreset()
     updatePresetLabel();
 }
 
-void BerryToneAudioProcessorEditor::savePresetAs()
+void BerryToneView::savePresetAs()
 {
     const auto initial = proc.presets.currentIsFactory() || proc.presets.getCurrentIndex() < 0
                              ? juce::String() : proc.presets.getCurrentName();
@@ -857,7 +877,7 @@ void BerryToneAudioProcessorEditor::savePresetAs()
              juce::String ("The preset stores all knobs, switches, module order and the current design (")
                  + (design == Design::grape ? "Grape" : "Berry") + ").",
              initial, "Save",
-             [safe = SafePointer<BerryToneAudioProcessorEditor> (this)] (juce::String name)
+             [safe = SafePointer<BerryToneView> (this)] (juce::String name)
     {
         if (safe == nullptr) return;
         auto doSave = [safe, name]
@@ -874,7 +894,7 @@ void BerryToneAudioProcessorEditor::savePresetAs()
     });
 }
 
-void BerryToneAudioProcessorEditor::renamePreset()
+void BerryToneView::renamePreset()
 {
     if (proc.presets.currentIsFactory() || proc.presets.getCurrentIndex() < 0)
     {
@@ -882,7 +902,7 @@ void BerryToneAudioProcessorEditor::renamePreset()
         return;
     }
     askText ("Rename preset", "Type a new name.", proc.presets.getCurrentName(), "Rename",
-             [safe = SafePointer<BerryToneAudioProcessorEditor> (this)] (juce::String name)
+             [safe = SafePointer<BerryToneView> (this)] (juce::String name)
     {
         if (safe == nullptr) return;
         const auto r = safe->proc.presets.rename (name);
@@ -891,7 +911,7 @@ void BerryToneAudioProcessorEditor::renamePreset()
     });
 }
 
-void BerryToneAudioProcessorEditor::deletePreset()
+void BerryToneView::deletePreset()
 {
     if (proc.presets.currentIsFactory() || proc.presets.getCurrentIndex() < 0)
     {
@@ -900,7 +920,7 @@ void BerryToneAudioProcessorEditor::deletePreset()
     }
     askConfirm ("Delete preset?", "\"" + proc.presets.getCurrentName() + "\" will be deleted. You cannot undo this.",
                 "Delete", true,
-                [safe = SafePointer<BerryToneAudioProcessorEditor> (this)]
+                [safe = SafePointer<BerryToneView> (this)]
     {
         if (safe == nullptr) return;
         const auto r = safe->proc.presets.remove();
@@ -911,7 +931,7 @@ void BerryToneAudioProcessorEditor::deletePreset()
 
 //==============================================================================
 // Updates from GitHub
-void BerryToneAudioProcessorEditor::showUpdateDialog()
+void BerryToneView::showUpdateDialog()
 {
     const auto info = checker->getInfo();
     auto notes = info.notes;
@@ -930,7 +950,7 @@ void BerryToneAudioProcessorEditor::showUpdateDialog()
     aw->addButton ("Release page", 2);
     aw->addButton ("Later", 0, juce::KeyPress (juce::KeyPress::escapeKey));
 
-    openDialog (aw, [safe = SafePointer<BerryToneAudioProcessorEditor> (this), info] (int r, juce::AlertWindow&)
+    openDialog (aw, [safe = SafePointer<BerryToneView> (this), info] (int r, juce::AlertWindow&)
     {
         if (safe == nullptr) return;
         if (r == 1) safe->startInstall();
@@ -938,11 +958,11 @@ void BerryToneAudioProcessorEditor::showUpdateDialog()
     });
 }
 
-void BerryToneAudioProcessorEditor::startInstall()
+void BerryToneView::startInstall()
 {
     const auto info = checker->getInfo();
     installer = std::make_unique<updater::UpdateInstaller>();
-    installer->onFinished = [safe = SafePointer<BerryToneAudioProcessorEditor> (this), info] (bool ok, const juce::String& msg)
+    installer->onFinished = [safe = SafePointer<BerryToneView> (this), info] (bool ok, const juce::String& msg)
     {
         if (safe == nullptr) return;
         if (safe->progressDialog != nullptr)
@@ -979,7 +999,7 @@ void BerryToneAudioProcessorEditor::startInstall()
 
 //==============================================================================
 // Dialogs inside the plugin window
-juce::AlertWindow* BerryToneAudioProcessorEditor::makeDialog (const juce::String& title, const juce::String& text)
+juce::AlertWindow* BerryToneView::makeDialog (const juce::String& title, const juce::String& text)
 {
     auto* aw = new juce::AlertWindow (design == Design::grape ? title.toUpperCase() : title, text,
                                       juce::MessageBoxIconType::NoIcon, this);
@@ -987,7 +1007,7 @@ juce::AlertWindow* BerryToneAudioProcessorEditor::makeDialog (const juce::String
     return aw;
 }
 
-void BerryToneAudioProcessorEditor::openDialog (juce::AlertWindow* aw, std::function<void (int, juce::AlertWindow&)> onClose)
+void BerryToneView::openDialog (juce::AlertWindow* aw, std::function<void (int, juce::AlertWindow&)> onClose)
 {
     addAndMakeVisible (aw);
     aw->setCentrePosition (getLocalBounds().getCentre());
@@ -998,7 +1018,7 @@ void BerryToneAudioProcessorEditor::openDialog (juce::AlertWindow* aw, std::func
     }), true);
 }
 
-void BerryToneAudioProcessorEditor::showMessage (const juce::String& title, const juce::String& text)
+void BerryToneView::showMessage (const juce::String& title, const juce::String& text)
 {
     auto* aw = makeDialog (title, text);
     aw->addButton ("OK", 0, juce::KeyPress (juce::KeyPress::returnKey));
@@ -1006,7 +1026,7 @@ void BerryToneAudioProcessorEditor::showMessage (const juce::String& title, cons
     openDialog (aw, nullptr);
 }
 
-void BerryToneAudioProcessorEditor::askText (const juce::String& title, const juce::String& text, const juce::String& initial,
+void BerryToneView::askText (const juce::String& title, const juce::String& text, const juce::String& initial,
                                              const juce::String& okText, std::function<void (juce::String)> onOk)
 {
     auto* aw = makeDialog (title, text);
@@ -1032,7 +1052,7 @@ void BerryToneAudioProcessorEditor::askText (const juce::String& title, const ju
     }
 }
 
-void BerryToneAudioProcessorEditor::askConfirm (const juce::String& title, const juce::String& text, const juce::String& okText,
+void BerryToneView::askConfirm (const juce::String& title, const juce::String& text, const juce::String& okText,
                                                 bool danger, std::function<void()> onOk)
 {
     auto* aw = makeDialog (title, text);
@@ -1043,4 +1063,47 @@ void BerryToneAudioProcessorEditor::askConfirm (const juce::String& title, const
     {
         if (r == 1 && onOk) onOk();
     });
+}
+
+//==============================================================================
+BerryToneAudioProcessorEditor::BerryToneAudioProcessorEditor (BerryToneAudioProcessor& p)
+    : AudioProcessorEditor (&p), proc (p), view (p)
+{
+    setLookAndFeel (&view.getLookAndFeelTheme());   // the corner resizer uses the theme
+    addAndMakeVisible (view);
+    view.onScaleRequest = [this] (float s) { setScale (s); };
+
+    // read the saved scale first: setResizeLimits() resizes the editor (and calls resized())
+    const float s = juce::jlimit (minScale, maxScale, proc.uiScale.load());
+
+    constexpr int w = BerryToneView::designW, h = BerryToneView::designH;
+    setResizable (true, true);
+    setResizeLimits (juce::roundToInt (w * minScale), juce::roundToInt (h * minScale),
+                     juce::roundToInt (w * maxScale), juce::roundToInt (h * maxScale));
+    getConstrainer()->setFixedAspectRatio ((double) w / (double) h);
+
+    setSize (juce::roundToInt (w * s), juce::roundToInt (h * s));
+}
+
+BerryToneAudioProcessorEditor::~BerryToneAudioProcessorEditor()
+{
+    setLookAndFeel (nullptr);
+}
+
+void BerryToneAudioProcessorEditor::setScale (float s)
+{
+    s = juce::jlimit (minScale, maxScale, s);
+    setSize (juce::roundToInt (BerryToneView::designW * s), juce::roundToInt (BerryToneView::designH * s));
+}
+
+void BerryToneAudioProcessorEditor::resized()
+{
+    // the view keeps its design size; a transform scales it to the window
+    const float sx = (float) getWidth()  / (float) BerryToneView::designW;
+    const float sy = (float) getHeight() / (float) BerryToneView::designH;
+    view.setBounds (0, 0, BerryToneView::designW, BerryToneView::designH);
+    view.setTransform (juce::AffineTransform::scale (sx, sy));
+
+    proc.uiScale = sx;
+    view.setCurrentScale (sx);
 }

@@ -345,6 +345,30 @@ void ThemeLookAndFeel::drawButtonBackground (Graphics& g, juce::Button& b, const
     const bool on = b.getToggleState();
     const bool isDanger = (bool) b.getProperties()["danger"];
 
+    if (st == "size")   // window size buttons: two halves of one pill
+    {
+        const bool l = ! b.isConnectedOnLeft(), rt = ! b.isConnectedOnRight();
+        const float rad = grape() ? 6.f : r.getHeight() * 0.5f;
+        juce::Path p;
+        p.addRoundedRectangle (r.getX(), r.getY(), r.getWidth(), r.getHeight(), rad, rad, l, rt, l, rt);
+        if (grape())
+        {
+            using namespace grapecol;
+            if (on) g.setGradientFill (juce::ColourGradient::vertical (Colour (0xff6a2a63), r.getY(), Colour (0xff4a1a45), r.getBottom()));
+            else    g.setGradientFill (juce::ColourGradient::vertical (hl ? Colour (0xff3e1a3a) : Colour (0xff341431), r.getY(), Colour (0xff220d20), r.getBottom()));
+            g.fillPath (p);
+            g.setColour (border);
+            g.strokePath (p, juce::PathStrokeType (1.f));
+        }
+        else
+        {
+            using namespace berrycol;
+            g.setColour (on ? pink : cream.withAlpha (hl ? 1.f : 0.9f));
+            g.fillPath (p);
+        }
+        return;
+    }
+
     if (st == "flat")
     {
         if (hl || down)
@@ -579,6 +603,7 @@ void ThemeLookAndFeel::drawButtonText (Graphics& g, juce::TextButton& b, bool hl
     {
         using namespace grapecol;
         if (st == "seg")         c = on ? juce::Colours::white : muted;
+        else if (st == "size")   c = on ? grapecol::text : muted;
         else if (st == "flat")   c = grapecol::text;
         else if (primary)        c = juce::Colours::white;
         else if (isDanger)       c = grapecol::danger;
@@ -587,7 +612,7 @@ void ThemeLookAndFeel::drawButtonText (Graphics& g, juce::TextButton& b, bool hl
     else
     {
         using namespace berrycol;
-        if (st == "seg")         c = on ? cream : deep;
+        if (st == "seg" || st == "size") c = on ? cream : deep;
         else if (st == "flat")   c = deep;
         else if (st == "update") c = deep;
         else if (st == "pill")   c = isDanger ? berrycol::danger : deep;
@@ -657,3 +682,17 @@ juce::Font ThemeLookAndFeel::getAlertWindowTitleFont()   { return grape() ? font
 juce::Font ThemeLookAndFeel::getAlertWindowMessageFont() { return font (13.f, false); }
 juce::Font ThemeLookAndFeel::getAlertWindowFont()        { return font (13.f, false); }
 juce::Font ThemeLookAndFeel::getPopupMenuFont()          { return font (14.f, ! grape()); }
+
+//==============================================================================
+void ThemeLookAndFeel::drawCornerResizer (Graphics& g, int w, int h, bool isMouseOver, bool isMouseDragging)
+{
+    auto c = grape() ? grapecol::dim : berrycol::cream.withAlpha (0.7f);
+    if (isMouseOver || isMouseDragging) c = grape() ? grapecol::label : berrycol::cream;
+    g.setColour (c);
+    const float sx = (float) w / 14.f, sy = (float) h / 14.f;
+    juce::Path p;
+    p.startNewSubPath (13.f * sx, 3.f * sy);  p.lineTo (3.f * sx, 13.f * sy);
+    p.startNewSubPath (13.f * sx, 7.f * sy);  p.lineTo (7.f * sx, 13.f * sy);
+    p.startNewSubPath (13.f * sx, 11.f * sy); p.lineTo (11.f * sx, 13.f * sy);
+    g.strokePath (p, juce::PathStrokeType (1.5f * sx, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}

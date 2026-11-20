@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 # The version lives here. Release builds can override it: -DBERRY_VERSION=x.y.z
 if(NOT DEFINED BERRY_VERSION)
-    set(BERRY_VERSION 1.1.0)
+    set(BERRY_VERSION 1.1.1)
 endif()
 project(BerryTone VERSION ${BERRY_VERSION})
 
@@ -15,7 +15,7 @@ FetchContent_Declare(JUCE
     GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(JUCE)
 
-set(BERRY_FORMATS VST3 Standalone)
+set(BERRY_FORMATS VST3)   # no Standalone build
 if(APPLE)
     list(APPEND BERRY_FORMATS AU)
 endif()
@@ -66,3 +66,14 @@ target_link_libraries(BerryTone
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# Dev tool: renders the plugin window into PNG files (layout checks without a DAW).
+# Off by default. Not part of the release.
+option(BERRY_SNAPSHOT "Build the BerryToneSnapshot dev tool" OFF)
+if(BERRY_SNAPSHOT)
+    add_executable(BerryToneSnapshot tools/snapshot/snapshot.cpp)
+    target_include_directories(BerryToneSnapshot PRIVATE Source "${JUCE_MODULES_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}/BerryTone_artefacts/JuceLibraryCode")
+    target_compile_definitions(BerryToneSnapshot PRIVATE $<TARGET_PROPERTY:BerryTone,COMPILE_DEFINITIONS>)
+    target_link_libraries(BerryToneSnapshot PRIVATE BerryTone)
+endif()

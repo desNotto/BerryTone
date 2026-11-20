@@ -76,6 +76,7 @@ public:
     juce::Font getAlertWindowMessageFont() override;
     juce::Font getAlertWindowFont() override;
     juce::Font getPopupMenuFont() override;
+    void drawCornerResizer (juce::Graphics&, int w, int h, bool isMouseOver, bool isMouseDragging) override;
 
     // shared drawing helpers
     static juce::Font font (float height, bool bold = true, float kerning = 0.f);

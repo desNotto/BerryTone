@@ -236,32 +236,26 @@ void UpdateInstaller::run()
         if (zip.getNumEntries() == 0 || zip.uncompressTo (unpacked, true).failed())
             return finish (false, "Cannot unpack the update.");
     }
-    juce::File newBundle, newExe;
-    for (auto& f : unpacked.findChildFiles (juce::File::findDirectories, true, "BerryTone.vst3"))
-        if (f.getChildFile ("Contents").isDirectory()) { newBundle = f; break; }
-    for (auto& f : unpacked.findChildFiles (juce::File::findFiles, true, "BerryTone.exe"))
-        { newExe = f; break; }
-    if (! newBundle.isDirectory())
+    // The release zip holds BerryTone.vst3 as one file (the plugin DLL).
+    juce::File newDll;
+    for (auto& f : unpacked.findChildFiles (juce::File::findFiles, true, "BerryTone.vst3"))
+        { newDll = f; break; }
+    if (! newDll.existsAsFile())
         return finish (false, "The update has no BerryTone.vst3.");
 
-    // 3. find the installed files
+    // 3. find the installed file.
+    //    - Loaded from a single file: replace that file.
+    //    - Loaded from an old bundle folder: replace the DLL inside the bundle
+    //      (the DAW already knows this path).
+    //    - Otherwise: %CommonProgramFiles%\VST3\BerryTone.vst3.
     const auto common = juce::SystemStats::getEnvironmentVariable ("CommonProgramFiles", "C:\\Program Files\\Common Files");
-    auto bundleDst = juce::File (common).getChildFile ("VST3").getChildFile ("BerryTone.vst3");
-    juce::File exeDst;
+    auto dst = juce::File (common).getChildFile ("VST3").getChildFile ("BerryTone.vst3");
     const auto self = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
-    const auto type = juce::PluginHostType::getPluginLoadedAs();
-    if (type == juce::AudioProcessor::wrapperType_VST3)
-    {
-        auto b = self.getParentDirectory().getParentDirectory().getParentDirectory();
-        if (b.getFileExtension().equalsIgnoreCase (".vst3") && b.isDirectory())
-            bundleDst = b;
-    }
-    else if (type == juce::AudioProcessor::wrapperType_Standalone && newExe.existsAsFile())
-    {
-        exeDst = self;
-    }
+    if (juce::PluginHostType::getPluginLoadedAs() == juce::AudioProcessor::wrapperType_VST3
+         && self.hasFileExtension (".vst3") && self.existsAsFile())
+        dst = self;
 
-    // 4. write and run the install script. A loaded DLL / EXE can be renamed but
+    // 4. write and run the install script. A loaded DLL can be renamed but
     //    not overwritten, so the script renames the old file first.
     auto log = root.getChildFile ("install.log");
     juce::String ps;
@@ -275,17 +269,13 @@ void UpdateInstaller::run()
        << "  }\r\n"
        << "}\r\n"
        << "try {\r\n"
-       << "  $src = " << psQuote (newBundle.getFullPathName()) << "\r\n"
-       << "  $dst = " << psQuote (bundleDst.getFullPathName()) << "\r\n"
-       << "  Move-Old (Join-Path $dst 'Contents\\x86_64-win\\BerryTone.vst3')\r\n"
-       << "  New-Item -ItemType Directory -Force -Path $dst | Out-Null\r\n"
-       << "  robocopy $src $dst /E /IS /IT /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null\r\n"
-       << "  if ($LASTEXITCODE -ge 8) { throw ('robocopy failed: ' + $LASTEXITCODE) }\r\n";
-    if (exeDst != juce::File())
-        ps << "  Move-Old " << psQuote (exeDst.getFullPathName()) << "\r\n"
-           << "  Copy-Item -LiteralPath " << psQuote (newExe.getFullPathName())
-           << " -Destination " << psQuote (exeDst.getFullPathName()) << " -Force\r\n";
-    ps << "  'OK' | Out-File -LiteralPath $log -Encoding utf8\r\n"
+       << "  $src = " << psQuote (newDll.getFullPathName()) << "\r\n"
+       << "  $dst = " << psQuote (dst.getFullPathName()) << "\r\n"
+       // an old bundle folder at the target path is renamed too
+       << "  Move-Old $dst\r\n"
+       << "  New-Item -ItemType Directory -Force -Path (Split-Path -LiteralPath $dst) | Out-Null\r\n"
+       << "  Copy-Item -LiteralPath $src -Destination $dst -Force\r\n"
+       << "  'OK' | Out-File -LiteralPath $log -Encoding utf8\r\n"
        << "  exit 0\r\n"
        << "} catch {\r\n"
        << "  ('ERROR: ' + $_.Exception.Message) | Out-File -LiteralPath $log -Encoding utf8\r\n"
@@ -296,7 +286,7 @@ void UpdateInstaller::run()
     if (! script.replaceWithText (ps, true, true))   // UTF-16 with BOM: safe for any path
         return finish (false, "Cannot write the install script.");
 
-    const bool elevated = ! canWriteTo (bundleDst) || (exeDst != juce::File() && ! canWriteTo (exeDst.getParentDirectory()));
+    const bool elevated = ! canWriteTo (dst.getParentDirectory());
     if (! runInstallScript (script, elevated, err))
     {
         if (err.isEmpty())
@@ -305,7 +295,7 @@ void UpdateInstaller::run()
     }
 
     progress = 1.0;
-    finish (true, "BerryTone v" + rel.version + " is installed in:\n" + bundleDst.getFullPathName()
+    finish (true, "BerryTone v" + rel.version + " is installed in:\n" + dst.getFullPathName()
                       + "\n\nRestart the DAW to use the new version.");
    #endif
 }

@@ -1,7 +1,14 @@
 # BerryTone
 
-A pre-amp-sim conditioner for low-tuned guitar (7/8-string, drop tunings, baritone). VST3 (+ Standalone, + AU on macOS). JUCE 8 / C++17.
+A pre-amp-sim conditioner for low-tuned guitar (7/8-string, drop tunings, baritone). VST3 (+ AU on macOS). No Standalone build. JUCE 8 / C++17.
 Author: **desNotto**.
+
+## What is new in 1.1.1
+- The Windows release has `BerryTone.vst3` as one file. DAWs that did not find the 1.1.0 bundle folder now find the plugin.
+- No Standalone build.
+- The updater replaces the one plugin file.
+- **Resizable window.** Drag the window edge or the corner at the bottom right (75 % - 200 %, the proportions stay). The **100% / 125%** buttons at the bottom set a fixed size. The session remembers the size; presets do not store it.
+- The line under the logo is shorter. It does not go under the preset buttons now.
 
 ## What is new in 1.1.0
 - **DI Scope.** A window above the modules shows your signal in real time.
@@ -42,10 +49,13 @@ Requires CMake 3.22+, a C++17 compiler, and git (JUCE is fetched automatically).
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
-The build does not copy the plugin into the system folder. Copy `build/BerryTone_artefacts/Release/VST3/BerryTone.vst3` to `C:\Program Files\Common Files\VST3`, or use a release zip.
+The build does not copy the plugin into the system folder. Use a release zip, or copy the file `build/BerryTone_artefacts/Release/VST3/BerryTone.vst3/Contents/x86_64-win/BerryTone.vst3` to `C:\Program Files\Common Files\VST3`.
+Windows releases ship `BerryTone.vst3` as one file, not as a bundle folder: some DAWs do not find the folder.
+
+Layout check without a DAW: configure with `-DBERRY_SNAPSHOT=ON` and build `BerryToneSnapshot`. It writes PNG files of the plugin window (both designs, 100 / 125 / 80 %). It is a dev tool, not part of the release.
 
 ## Release
-`tools/make_release.ps1` builds the plugin and puts `BerryTone-v<version>` (VST3, Standalone, zip) into the `Releases` folder next to the repository.
+`tools/make_release.ps1` builds the plugin and puts `BerryTone-v<version>` (the single-file VST3 and the zip) into the `Releases` folder next to the repository.
 Add `-Publish` to make the git tag and the GitHub release. The zip name must end with `-win64.zip`: the updater looks for it.
 Change the version in `CMakeLists.txt` (`BERRY_VERSION`) before a new release.
 

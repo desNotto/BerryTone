@@ -5,12 +5,16 @@
 #include "ScopeView.h"
 #include "Updater.h"
 
-class BerryToneAudioProcessorEditor : public juce::AudioProcessorEditor,
-                                      private juce::Timer
+// The whole plugin UI at its design size (940 x 700).
+// BerryToneAudioProcessorEditor (below) scales it to the window size.
+class BerryToneView : public juce::Component,
+                      private juce::Timer
 {
 public:
-    explicit BerryToneAudioProcessorEditor (BerryToneAudioProcessor&);
-    ~BerryToneAudioProcessorEditor() override;
+    static constexpr int designW = 940, designH = 700;
+
+    explicit BerryToneView (BerryToneAudioProcessor&);
+    ~BerryToneView() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -20,6 +24,12 @@ public:
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp   (const juce::MouseEvent&) override;
+
+    ThemeLookAndFeel& getLookAndFeelTheme() { return lnf; }
+
+    // The window size buttons (100% / 125%) call this.
+    std::function<void (float)> onScaleRequest;
+    void setCurrentScale (float);   // lights the matching size button
 
 private:
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -90,7 +100,7 @@ private:
     juce::TextButton modeReal { "REAL DI" }, modeFlat { "FLAT LINE" }, pureBtn, holdBtn { "HOLD" };
     juce::TextButton presetPrev, presetNext, presetName, saveBtn { "Save" }, saveAsBtn { "Save as" },
                      renameBtn { "Rename" }, deleteBtn { "Delete" };
-    juce::TextButton updateBtn, resetBtn { "Reset order" };
+    juce::TextButton updateBtn, resetBtn { "Reset order" }, size100 { "100%" }, size125 { "125%" };
 
     juce::SharedResourcePointer<updater::UpdateChecker> checker;
     std::unique_ptr<updater::UpdateInstaller> installer;
@@ -103,6 +113,28 @@ private:
     float inLvl = 0.f, outLvl = 0.f;
     bool gateOpenLed = true, lastPure = false;
     juce::String lastPresetText;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BerryToneView)
+};
+
+//==============================================================================
+// The plugin window. Drag an edge or the corner to resize it; the aspect
+// ratio stays fixed and the view scales (75 % - 200 %).
+class BerryToneAudioProcessorEditor : public juce::AudioProcessorEditor
+{
+public:
+    explicit BerryToneAudioProcessorEditor (BerryToneAudioProcessor&);
+    ~BerryToneAudioProcessorEditor() override;
+
+    void resized() override;
+
+    static constexpr float minScale = 0.75f, maxScale = 2.0f;
+
+private:
+    void setScale (float);
+
+    BerryToneAudioProcessor& proc;
+    BerryToneView view;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BerryToneAudioProcessorEditor)
 };

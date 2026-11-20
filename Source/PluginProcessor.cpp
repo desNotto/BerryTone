@@ -323,14 +323,24 @@ bool BerryToneAudioProcessor::stateFromXml (const juce::XmlElement& xml)
 void BerryToneAudioProcessor::getStateInformation (juce::MemoryBlock& dest_)
 {
     if (auto xml = stateToXml())
+    {
+        xml->setAttribute ("uiScale", (double) uiScale.load());   // session only, presets do not store it
         copyXmlToBinary (*xml, dest_);
+    }
 }
 
 void BerryToneAudioProcessor::setStateInformation (const void* data, int size)
 {
     if (auto xml = getXmlFromBinary (data, size))
+    {
+        if (xml->hasAttribute ("uiScale"))
+        {
+            uiScale = juce::jlimit (0.75f, 2.0f, (float) xml->getDoubleAttribute ("uiScale", 1.0));
+            xml->removeAttribute ("uiScale");
+        }
         if (stateFromXml (*xml))
             presets.syncFromState();
+    }
 }
 
 //==============================================================================

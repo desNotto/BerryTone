@@ -5,7 +5,7 @@
 // Gets plugin updates from the GitHub releases of the project.
 //  1. UpdateChecker reads the latest release (once per process).
 //  2. UpdateInstaller downloads the "*-win64.zip" asset, unpacks it and
-//     replaces the installed VST3 / Standalone files. Windows asks for
+//     replaces the installed VST3 file (one file, not a bundle folder). Windows asks for
 //     admin rights (UAC) when the plugin folder needs them.
 //     The new version starts after the DAW restarts.
 namespace updater

@@ -5,3 +5,4 @@ out/
 *.user
 CMakeUserPresets.json
 build_*.log
+build_*/
