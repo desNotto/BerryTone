@@ -228,6 +228,11 @@ The script builds the plugin and writes `BerryTone-v<version>` (the VST3 file an
 
 ## Version history
 
+### 1.2.1
+- The update button works again. The install script of 1.1.2 and 1.2.0 stopped with the error "Parameter set cannot be resolved" in Windows PowerShell 5.1.
+- Versions 1.1.2 and 1.2.0 cannot install updates. Install 1.2.1 by hand one time: copy `BerryTone.vst3` over the old file. After that, the update button works.
+- The updater replaces the plugin file in the folder that the DAW uses.
+
 ### 1.2.0
 - DI Scope: new mode **SPECTRUM** (live spectrum of DI and OUT).
 - REAL DI: **TIME** buttons (1 s, 200 ms, 50 ms) with a trigger for the short windows.

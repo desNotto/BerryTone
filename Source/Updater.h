@@ -23,6 +23,13 @@ namespace updater
     // true when version a is newer than version b ("1.10.0" > "1.9.3")
     bool isNewer (const juce::String& a, const juce::String& b);
 
+    // The PowerShell script that replaces the plugin file dst with src and writes
+    // "OK" or "ERROR: ..." into log. It must run in Windows PowerShell 5.1:
+    // it uses .NET path functions, not Split-Path (Split-Path -LiteralPath -Leaf
+    // fails in 5.1). A loaded DLL can be renamed but not overwritten, so the
+    // script renames the old file (or an old bundle folder) first.
+    juce::String makeInstallScript (const juce::File& src, const juce::File& dst, const juce::File& log);
+
     class UpdateChecker : private juce::Thread
     {
     public:

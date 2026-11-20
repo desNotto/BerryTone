@@ -4,6 +4,12 @@
 //   BerryToneSnapshot <outDir>
 #include "../../Source/PluginEditor.h"
 #include <cstdio>
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#endif
 
 // Feeds 1.5 s of palm-muted low-E-like chugs (with pauses) through the processor.
 static void feedAudio (BerryToneAudioProcessor& proc)
@@ -63,6 +69,67 @@ static int holdCheck()
     return (pureSame && std::abs (ratioDb + 12.f) < 0.5f && pa > 0.01f) ? 0 : 1;
 }
 
+
+// Runs the updater's install script in Windows PowerShell 5.1 (the version the updater starts).
+static int installScriptCheck()
+{
+   #if JUCE_WINDOWS
+    auto root = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("BerryTone-installtest");
+    root.deleteRecursively();
+    root.createDirectory();
+    auto src = root.getChildFile ("new").getChildFile ("BerryTone.vst3");
+    src.getParentDirectory().createDirectory();
+    src.replaceWithText (juce::String::repeatedString ("NEW", 2000));
+
+    int failures = 0;
+    auto run = [&] (const juce::String& caseName, const juce::File& dst, std::function<void()> prepare)
+    {
+        if (prepare) prepare();
+        auto log = root.getChildFile ("install.log");
+        log.deleteFile();
+        auto script = root.getChildFile ("install.ps1");
+        script.replaceWithText (updater::makeInstallScript (src, dst, log), true, true);
+        juce::ChildProcess cp;
+        juce::StringArray args { "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.getFullPathName() };
+        const bool started = cp.start (args);
+        if (started) cp.waitForProcessToFinish (60000);
+        const auto code = started ? cp.getExitCode() : 999u;
+        const bool ok = code == 0 && dst.existsAsFile() && dst.loadFileAsString() == src.loadFileAsString();
+        int olds = 0;
+        for (auto& f : dst.getParentDirectory().findChildFiles (juce::File::findFilesAndDirectories, false, dst.getFileName() + ".old*"))
+            { juce::ignoreUnused (f); ++olds; }
+        std::printf ("install %-22s exit %u, file ok %s, old copies %d, log: %s\n", caseName.toRawUTF8(), code,
+                     ok ? "yes" : "NO", olds, log.loadFileAsString().trim().toRawUTF8());
+        if (! ok) ++failures;
+    };
+
+    auto dir1 = root.getChildFile ("VstPlugIns");
+    auto dst1 = dir1.getChildFile ("BerryTone.vst3");
+    run ("old file", dst1, [&] { dir1.createDirectory(); dst1.replaceWithText ("OLD"); });
+    run ("second update", dst1, nullptr);   // removes the first .old copy
+    auto dst2 = root.getChildFile ("Bundle").getChildFile ("BerryTone.vst3");
+    run ("old bundle folder", dst2, [&] { dst2.getChildFile ("Contents").getChildFile ("x86_64-win").createDirectory(); });
+    run ("no folder", root.getChildFile ("Missing").getChildFile ("Sub").getChildFile ("BerryTone.vst3"), nullptr);
+    auto dir5 = root.getChildFile (juce::CharPointer_UTF8 ("Vst Plug'Ins \xd0\xa2\xd0\xb5\xd1\x81\xd1\x82"));
+    auto dst5 = dir5.getChildFile ("BerryTone.vst3");
+    run ("space ' cyrillic", dst5, [&] { dir5.createDirectory(); dst5.replaceWithText ("OLD"); });
+
+    // a loaded DLL: Windows lets the script rename it, not overwrite it
+    auto dir6 = root.getChildFile ("Loaded");
+    auto dst6 = dir6.getChildFile ("BerryTone.vst3");
+    dir6.createDirectory();
+    juce::File::getSpecialLocation (juce::File::windowsSystemDirectory).getChildFile ("version.dll").copyFileTo (dst6);
+    HMODULE h = LoadLibraryW (dst6.getFullPathName().toWideCharPointer());
+    run (h != nullptr ? "loaded DLL" : "loaded DLL (not loaded)", dst6, nullptr);
+    if (h != nullptr) FreeLibrary (h);
+
+    root.deleteRecursively();
+    return failures;
+   #else
+    return 0;
+   #endif
+}
+
 static void snap (const juce::File& outDir, const juce::String& name, Design d, float scale,
                   int scopeMode, int scopeTime, int scopeLevel, bool modulesOn)
 {
@@ -91,6 +158,7 @@ int main (int argc, char** argv)
     outDir.createDirectory();
 
     const int holdResult = holdCheck();
+    const int installFailures = installScriptCheck();
 
     // mode: 0 real, 1 flat, 2 spectrum   time: 0 1 s, 1 200 ms, 2 50 ms   level: 0 lin, 1 dB
     snap (outDir, "berry_100",        Design::berry, 1.0f,  0, 0, 0, true);
@@ -114,5 +182,5 @@ int main (int argc, char** argv)
     std::printf ("first launch: preset '%s', modules on: %d, design %s, modified %s\n",
                  proc.presets.getCurrentName().toRawUTF8(), onCount,
                  proc.getDesign() == Design::grape ? "grape" : "berry", proc.presets.isModified() ? "yes" : "no");
-    return (holdResult == 0 && onCount == 0) ? 0 : 1;
+    return (holdResult == 0 && installFailures == 0 && onCount == 0) ? 0 : 1;
 }

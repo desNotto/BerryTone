@@ -172,6 +172,34 @@ static bool canWriteTo (juce::File dir)
 
 static juce::String psQuote (const juce::String& s) { return "'" + s.replace ("'", "''") + "'"; }
 
+juce::String makeInstallScript (const juce::File& src, const juce::File& dst, const juce::File& log)
+{
+    juce::String ps;
+    ps << "$ErrorActionPreference = 'Stop'\r\n"
+       << "$log = " << psQuote (log.getFullPathName()) << "\r\n"
+       << "function Move-Old([string]$f) {\r\n"
+       << "  if (Test-Path -LiteralPath $f) {\r\n"
+       << "    $dir = [System.IO.Path]::GetDirectoryName($f)\r\n"
+       << "    $leaf = [System.IO.Path]::GetFileName($f)\r\n"
+       << "    Get-ChildItem -LiteralPath $dir -Filter ($leaf + '.old*') -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue\r\n"
+       << "    Rename-Item -LiteralPath $f -NewName ($leaf + '.old' + (Get-Date -Format 'yyyyMMddHHmmss'))\r\n"
+       << "  }\r\n"
+       << "}\r\n"
+       << "try {\r\n"
+       << "  $src = " << psQuote (src.getFullPathName()) << "\r\n"
+       << "  $dst = " << psQuote (dst.getFullPathName()) << "\r\n"
+       << "  Move-Old $dst\r\n"     // an old bundle folder at the target path is renamed too
+       << "  New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($dst)) | Out-Null\r\n"
+       << "  Copy-Item -LiteralPath $src -Destination $dst -Force\r\n"
+       << "  'OK' | Out-File -LiteralPath $log -Encoding utf8\r\n"
+       << "  exit 0\r\n"
+       << "} catch {\r\n"
+       << "  ('ERROR: ' + $_.Exception.Message) | Out-File -LiteralPath $log -Encoding utf8\r\n"
+       << "  exit 1\r\n"
+       << "}\r\n";
+    return ps;
+}
+
 bool UpdateInstaller::runInstallScript (const juce::File& script, bool elevated, juce::String& err)
 {
    #if JUCE_WINDOWS
@@ -258,29 +286,7 @@ void UpdateInstaller::run()
     // 4. write and run the install script. A loaded DLL can be renamed but
     //    not overwritten, so the script renames the old file first.
     auto log = root.getChildFile ("install.log");
-    juce::String ps;
-    ps << "$ErrorActionPreference = 'Stop'\r\n"
-       << "$log = " << psQuote (log.getFullPathName()) << "\r\n"
-       << "function Move-Old($f) {\r\n"
-       << "  if (Test-Path -LiteralPath $f) {\r\n"
-       << "    $dir = Split-Path -LiteralPath $f; $leaf = Split-Path -LiteralPath $f -Leaf\r\n"
-       << "    Get-ChildItem -LiteralPath $dir -Filter ($leaf + '.old*') -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue\r\n"
-       << "    Rename-Item -LiteralPath $f -NewName ($leaf + '.old' + (Get-Date -Format 'yyyyMMddHHmmss'))\r\n"
-       << "  }\r\n"
-       << "}\r\n"
-       << "try {\r\n"
-       << "  $src = " << psQuote (newDll.getFullPathName()) << "\r\n"
-       << "  $dst = " << psQuote (dst.getFullPathName()) << "\r\n"
-       // an old bundle folder at the target path is renamed too
-       << "  Move-Old $dst\r\n"
-       << "  New-Item -ItemType Directory -Force -Path (Split-Path -LiteralPath $dst) | Out-Null\r\n"
-       << "  Copy-Item -LiteralPath $src -Destination $dst -Force\r\n"
-       << "  'OK' | Out-File -LiteralPath $log -Encoding utf8\r\n"
-       << "  exit 0\r\n"
-       << "} catch {\r\n"
-       << "  ('ERROR: ' + $_.Exception.Message) | Out-File -LiteralPath $log -Encoding utf8\r\n"
-       << "  exit 1\r\n"
-       << "}\r\n";
+    const auto ps = makeInstallScript (newDll, dst, log);
 
     auto script = root.getChildFile ("install.ps1");
     if (! script.replaceWithText (ps, true, true))   // UTF-16 with BOM: safe for any path
