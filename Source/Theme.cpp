@@ -333,6 +333,8 @@ void ThemeLookAndFeel::drawToggleButton (Graphics& g, juce::ToggleButton& b, boo
 juce::Font ThemeLookAndFeel::getTextButtonFont (juce::TextButton& b, int h)
 {
     const auto st = styleOf (b);
+    if (st == "chip") return font (9.5f, true, grape() ? 0.04f : 0.f);
+    if (st == "seg")  return font (9.5f, true, grape() ? 0.03f : 0.f);   // three modes in 170 px
     if (grape())
         return font (st == "flat" ? 13.f : juce::jmin (11.f, (float) h * 0.5f), true, st == "flat" ? 0.03f : 0.06f);
     return font (st == "flat" ? 13.f : (st == "reset" ? 11.f : juce::jmin (11.f, (float) h * 0.55f)), st != "reset");
@@ -344,6 +346,39 @@ void ThemeLookAndFeel::drawButtonBackground (Graphics& g, juce::Button& b, const
     auto r = b.getLocalBounds().toFloat();
     const bool on = b.getToggleState();
     const bool isDanger = (bool) b.getProperties()["danger"];
+
+    if (st == "chip")   // scope TIME / LEVEL buttons (the group background is drawn by the scope)
+    {
+        if (grape())
+        {
+            using namespace grapecol;
+            auto rr = r.reduced (0.5f);
+            if (on)
+            {
+                juce::Path p; p.addRoundedRectangle (rr, 3.f);
+                drawGlow (g, p, glow, 1.2f);
+                g.setGradientFill (juce::ColourGradient::vertical (Colour (0xff7a2a8f), rr.getY(), border, rr.getBottom()));
+                g.fillRoundedRectangle (rr, 3.f);
+                g.setColour (trace);
+                g.drawRoundedRectangle (rr, 3.f, 1.f);
+            }
+            else if (hl)
+            {
+                g.setColour (Colour (0xff2a1027));
+                g.fillRoundedRectangle (rr, 3.f);
+            }
+        }
+        else if (on || hl)
+        {
+            const bool l = ! b.isConnectedOnLeft(), rt = ! b.isConnectedOnRight();
+            const float rad = r.getHeight() * 0.5f;
+            juce::Path p;
+            p.addRoundedRectangle (r.getX(), r.getY(), r.getWidth(), r.getHeight(), rad, rad, l, rt, l, rt);
+            g.setColour (on ? berrycol::pink : berrycol::cream.withAlpha (0.1f));
+            g.fillPath (p);
+        }
+        return;
+    }
 
     if (st == "size")   // window size buttons: two halves of one pill
     {
@@ -447,8 +482,15 @@ void ThemeLookAndFeel::drawButtonBackground (Graphics& g, juce::Button& b, const
         using namespace berrycol;
         if (st == "seg")
         {
-            if (on) { g.setColour (pink); g.fillRect (r); }
-            else if (hl) { g.setColour (pink.withAlpha (0.12f)); g.fillRect (r); }
+            if (on || hl)
+            {
+                const bool l = ! b.isConnectedOnLeft(), rt = ! b.isConnectedOnRight();
+                const float rad = r.getHeight() * 0.5f;
+                juce::Path p;
+                p.addRoundedRectangle (r.getX(), r.getY(), r.getWidth(), r.getHeight(), rad, rad, l, rt, l, rt);
+                g.setColour (on ? pink : pink.withAlpha (0.12f));
+                g.fillPath (p);
+            }
             return;
         }
         if (st == "hold")
@@ -604,6 +646,7 @@ void ThemeLookAndFeel::drawButtonText (Graphics& g, juce::TextButton& b, bool hl
         using namespace grapecol;
         if (st == "seg")         c = on ? juce::Colours::white : muted;
         else if (st == "size")   c = on ? grapecol::text : muted;
+        else if (st == "chip")   c = on ? juce::Colours::white : muted;
         else if (st == "flat")   c = grapecol::text;
         else if (primary)        c = juce::Colours::white;
         else if (isDanger)       c = grapecol::danger;
@@ -613,6 +656,7 @@ void ThemeLookAndFeel::drawButtonText (Graphics& g, juce::TextButton& b, bool hl
     {
         using namespace berrycol;
         if (st == "seg" || st == "size") c = on ? cream : deep;
+        else if (st == "chip")   c = on ? cream : cream.withAlpha (0.75f);
         else if (st == "flat")   c = deep;
         else if (st == "update") c = deep;
         else if (st == "pill")   c = isDanger ? berrycol::danger : deep;
@@ -641,7 +685,8 @@ void ThemeLookAndFeel::drawButtonText (Graphics& g, juce::TextButton& b, bool hl
         return;
     }
 
-    if (grape() && st != "flat") text = text.toUpperCase();
+    if (grape() && st != "flat" && st != "chip") text = text.toUpperCase();   // "1 s", "dB" keep their case
+    if (st == "chip") { g.drawFittedText (text, r, juce::Justification::centred, 1, 0.8f); return; }
     g.drawFittedText (text, r.reduced (4, 0), juce::Justification::centred, 1, 0.8f);
 }
 

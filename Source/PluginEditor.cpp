@@ -35,20 +35,59 @@ BerryToneView::BerryToneView (BerryToneAudioProcessor& p)
     // --- DI scope + its controls ---
     addAndMakeVisible (scope);
 
-    for (auto* b : { &modeReal, &modeFlat })
+    for (auto* b : { &modeReal, &modeSpec, &modeFlat })
     {
         styleButton (*b, "seg");
         b->setRadioGroupId (1001);
         b->setClickingTogglesState (true);
     }
-    const bool flat = (int) proc.apvts.state.getProperty ("scopeMode", 0) == 1;
-    modeReal.setToggleState (! flat, juce::dontSendNotification);
-    modeFlat.setToggleState (flat, juce::dontSendNotification);
-    scope.setMode (flat ? ScopeView::Mode::flat : ScopeView::Mode::real);
-    modeReal.onClick = [this] { scope.setMode (ScopeView::Mode::real); proc.apvts.state.setProperty ("scopeMode", 0, nullptr); };
-    modeFlat.onClick = [this] { scope.setMode (ScopeView::Mode::flat); proc.apvts.state.setProperty ("scopeMode", 1, nullptr); };
+    modeReal.setConnectedEdges (juce::Button::ConnectedOnRight);
+    modeSpec.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+    modeFlat.setConnectedEdges (juce::Button::ConnectedOnLeft);
+    // saved values: 0 = REAL DI, 1 = FLAT LINE, 2 = SPECTRUM
+    const int savedMode = juce::jlimit (0, 2, (int) proc.apvts.state.getProperty ("scopeMode", 0));
+    const auto startMode = static_cast<ScopeView::Mode> (savedMode);
+    modeReal.setToggleState (startMode == ScopeView::Mode::real, juce::dontSendNotification);
+    modeSpec.setToggleState (startMode == ScopeView::Mode::spectrum, juce::dontSendNotification);
+    modeFlat.setToggleState (startMode == ScopeView::Mode::flat, juce::dontSendNotification);
+    scope.setMode (startMode);
+    auto setMode = [this] (ScopeView::Mode m)
+    {
+        scope.setMode (m);
+        proc.apvts.state.setProperty ("scopeMode", (int) m, nullptr);
+        updateScopeChips();
+    };
+    modeReal.onClick = [setMode] { setMode (ScopeView::Mode::real); };
+    modeSpec.onClick = [setMode] { setMode (ScopeView::Mode::spectrum); };
+    modeFlat.onClick = [setMode] { setMode (ScopeView::Mode::flat); };
     modeReal.setTooltip ("Real DI: the raw DI (grey) and the signal after the modules");
+    modeSpec.setTooltip ("Spectrum: the live DI (grey area) and OUT (line), 20 Hz - 20 kHz");
     modeFlat.setTooltip ("Flat line: a flat test signal. The modules bend the line (20 Hz - 20 kHz)");
+
+    // REAL DI: time window and level scale (buttons on the screen)
+    for (auto* b : { &zoom1s, &zoom200, &zoom50 }) { styleButton (*b, "chip"); b->setRadioGroupId (1002); b->setClickingTogglesState (true); }
+    for (auto* b : { &lvlLin, &lvlDb })            { styleButton (*b, "chip"); b->setRadioGroupId (1003); b->setClickingTogglesState (true); }
+    zoom1s.setConnectedEdges (juce::Button::ConnectedOnRight);
+    zoom200.setConnectedEdges (juce::Button::ConnectedOnLeft | juce::Button::ConnectedOnRight);
+    zoom50.setConnectedEdges (juce::Button::ConnectedOnLeft);
+    lvlLin.setConnectedEdges (juce::Button::ConnectedOnRight);
+    lvlDb.setConnectedEdges (juce::Button::ConnectedOnLeft);
+    const int savedZoom = juce::jlimit (0, 2, (int) proc.apvts.state.getProperty ("scopeTime", 0));
+    const int savedLevel = juce::jlimit (0, 1, (int) proc.apvts.state.getProperty ("scopeLevel", 0));
+    juce::TextButton* zb[] = { &zoom1s, &zoom200, &zoom50 };
+    zb[savedZoom]->setToggleState (true, juce::dontSendNotification);
+    (savedLevel == 1 ? lvlDb : lvlLin).setToggleState (true, juce::dontSendNotification);
+    scope.setZoom (static_cast<ScopeView::Zoom> (savedZoom));
+    scope.setLevel (static_cast<ScopeView::Level> (savedLevel));
+    for (int i = 0; i < 3; ++i)
+        zb[i]->onClick = [this, i] { scope.setZoom (static_cast<ScopeView::Zoom> (i)); proc.apvts.state.setProperty ("scopeTime", i, nullptr); };
+    lvlLin.onClick = [this] { scope.setLevel (ScopeView::Level::lin); proc.apvts.state.setProperty ("scopeLevel", 0, nullptr); };
+    lvlDb.onClick  = [this] { scope.setLevel (ScopeView::Level::db);  proc.apvts.state.setProperty ("scopeLevel", 1, nullptr); };
+    zoom1s.setTooltip ("Time window 1 s (100 ms/div)");
+    zoom200.setTooltip ("Time window 200 ms (20 ms/div)");
+    zoom50.setTooltip ("Time window 50 ms (5 ms/div): you see the wave shape");
+    lvlLin.setTooltip ("Linear level, auto scale");
+    lvlDb.setTooltip ("dB level, 0 to -60 dBFS: you see the quiet parts and the gate");
 
     styleButton (pureBtn, "power");
     pureBtn.setClickingTogglesState (true);
@@ -60,6 +99,7 @@ BerryToneView::BerryToneView (BerryToneAudioProcessor& p)
     holdBtn.setClickingTogglesState (true);
     holdBtn.onClick = [this] { scope.setHold (holdBtn.getToggleState()); };
     holdBtn.setTooltip ("Freeze the DI. The OUT line still follows the modules.");
+    updateScopeChips();
 
     // --- presets ---
     styleButton (presetPrev, "flat");
@@ -178,6 +218,14 @@ void BerryToneView::applyDesign (Design d)
         parent->repaint();     // the corner resizer uses the same look
 }
 
+void BerryToneView::updateScopeChips()
+{
+    // the TIME / LEVEL buttons belong to REAL DI only
+    const bool real = scope.getMode() == ScopeView::Mode::real;
+    for (auto* b : { &zoom1s, &zoom200, &zoom50, &lvlLin, &lvlDb })
+        b->setVisible (real);
+}
+
 void BerryToneView::setCurrentScale (float s)
 {
     size100.setToggleState (std::abs (s - 1.0f)  < 0.01f, juce::dontSendNotification);
@@ -204,17 +252,26 @@ void BerryToneView::resized()
 
     // DI scope
     scope.setBounds (scopeScreen);
-    modeReal.setBounds (754, 156, grape ? 74 : 76, 24);
-    modeFlat.setBounds (grape ? 832 : 830, 156, grape ? 74 : 76, 24);
     if (grape)
     {
-        pureBtn.setBounds (760, 186, 52, 52);
+        modeReal.setBounds (734, 154, 55, 24);
+        modeSpec.setBounds (792, 154, 54, 24);
+        modeFlat.setBounds (849, 154, 55, 24);
+        pureBtn.setBounds (744, 186, 52, 52);
         holdBtn.setBounds (scopeScreen.getRight() - 68, scopeScreen.getBottom() - 27, 60, 20);
     }
     else
     {
-        pureBtn.setBounds (754, 188, 48, 48);
-        holdBtn.setBounds (818, 201, 88, 22);
+        modeReal.setBounds (736, 156, 57, 24);
+        modeSpec.setBounds (793, 156, 56, 24);
+        modeFlat.setBounds (849, 156, 57, 24);
+        pureBtn.setBounds (738, 188, 46, 46);
+        holdBtn.setBounds (798, 201, 108, 22);
+    }
+    {
+        juce::TextButton* chips[] = { &zoom1s, &zoom200, &zoom50, &lvlLin, &lvlDb };
+        for (int i = 0; i < 5; ++i)
+            chips[i]->setBounds (ScopeView::chipBounds (design, i).translated (scopeScreen.getX(), scopeScreen.getY()));
     }
 
     // footer
@@ -478,18 +535,18 @@ void BerryToneView::paintBerry (juce::Graphics& g)
         g.fillPath (card);
         g.setColour (deep);
         g.setFont (F::font (14.f));
-        g.drawText ("DI Scope", 754, 116, 150, 18, juce::Justification::centredLeft);
+        g.drawText ("DI Scope", 736, 116, 150, 18, juce::Justification::centredLeft);
         g.setColour (pink.withAlpha (0.9f));
         g.setFont (F::font (10.5f, false).italicised());
-        g.drawText ("juice x-ray", 754, 134, 150, 13, juce::Justification::centredLeft);
+        g.drawText ("juice x-ray", 736, 134, 150, 13, juce::Justification::centredLeft);
 
-        auto seg = juce::Rectangle<float> (754.f, 156.f, 152.f, 24.f);
+        auto seg = juce::Rectangle<float> (736.f, 156.f, 170.f, 24.f);
         g.setColour (pink.withAlpha (0.35f));
         g.drawRoundedRectangle (seg.reduced (0.75f), 12.f, 1.5f);
 
         g.setColour (deep);
         g.setFont (F::font (9.5f));
-        g.drawText ("PURE DI", 748, 236, 60, 12, juce::Justification::centred);
+        g.drawText ("PURE DI", 731, 236, 60, 12, juce::Justification::centred);
     }
 
     // --- module cards ---
@@ -640,16 +697,16 @@ void BerryToneView::paintGrape (juce::Graphics& g)
     drawPanel (scopeCard.toFloat(), true, false);
     g.setColour (text);
     g.setFont (F::font (13.f, true, 0.08f));
-    g.drawText ("DI SCOPE", 754, 114, 150, 18, juce::Justification::centredLeft);
+    g.drawText ("DI SCOPE", 734, 114, 150, 18, juce::Justification::centredLeft);
     g.setColour (flavor);
     g.setFont (F::font (10.f, false).italicised());
-    g.drawText ("grape x-ray", 754, 132, 150, 13, juce::Justification::centredLeft);
+    g.drawText ("grape x-ray", 734, 132, 150, 13, juce::Justification::centredLeft);
     g.setColour (text);
     g.setFont (F::font (11.f, true, 0.08f));
-    g.drawText ("PURE DI", 820, 198, 90, 14, juce::Justification::centredLeft);
+    g.drawText ("PURE DI", 806, 198, 90, 14, juce::Justification::centredLeft);
     g.setColour (muted);
     g.setFont (F::font (9.5f, false));
-    g.drawText ("mute all modules", 820, 214, 100, 12, juce::Justification::centredLeft);
+    g.drawText ("mute all modules", 806, 214, 100, 12, juce::Justification::centredLeft);
 
     // --- module panels ---
     for (auto& mp : modules)

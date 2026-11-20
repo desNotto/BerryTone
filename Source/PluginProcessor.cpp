@@ -256,7 +256,8 @@ void BerryToneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
         // --- DI scope: one min/max column per bucket ---
         diMono *= chInv; outMono *= chInv;
-        rawBuf[(size_t) rw].store (diMono, std::memory_order_relaxed);   // for HOLD
+        rawBuf[(size_t) rw].store (diMono, std::memory_order_relaxed);      // HOLD, zoom, spectrum
+        rawOutBuf[(size_t) rw].store (outMono, std::memory_order_relaxed);
         rw = (rw + 1) & (rawRing - 1);
         if (scopeCount == 0)
             scopeAcc = { diMono, diMono, outMono, outMono };
@@ -495,43 +496,37 @@ float BerryToneAudioProcessor::OfflineChain::process (float x)
     return s[0];
 }
 
-void BerryToneAudioProcessor::readRawDi (std::vector<float>& target, int numSamples) const
+void BerryToneAudioProcessor::readRaw (std::vector<float>& diTarget, std::vector<float>* outTarget, int numSamples) const
 {
     numSamples = juce::jlimit (1, rawRing, numSamples);
-    target.resize ((size_t) numSamples);
+    diTarget.resize ((size_t) numSamples);
+    if (outTarget != nullptr) outTarget->resize ((size_t) numSamples);
     const int w = rawWrite.load (std::memory_order_acquire);
     for (int i = 0; i < numSamples; ++i)
-        target[(size_t) i] = rawBuf[(size_t) ((w - numSamples + i + rawRing) & (rawRing - 1))].load (std::memory_order_relaxed);
+    {
+        const auto idx = (size_t) ((w - numSamples + i + rawRing) & (rawRing - 1));
+        diTarget[(size_t) i] = rawBuf[idx].load (std::memory_order_relaxed);
+        if (outTarget != nullptr)
+            (*outTarget)[(size_t) i] = rawOutBuf[idx].load (std::memory_order_relaxed);
+    }
 }
 
-void BerryToneAudioProcessor::renderHeld (const std::vector<float>& raw, double sr, int warmUp, std::vector<ScopeCol>& target) const
+void BerryToneAudioProcessor::processHeld (const std::vector<float>& raw, double sr, int warmUp, std::vector<float>& outTarget) const
 {
-    target.assign ((size_t) scopeCols, { 0.f, 0.f, 0.f, 0.f });
     const int n = (int) raw.size();
     warmUp = juce::jlimit (0, n, warmUp);
-    const int shown = n - warmUp;
-    if (shown <= 0) return;
+    outTarget.resize ((size_t) (n - warmUp));
 
-    const bool pure = pureDi.load();
+    if (pureDi.load())
+    {
+        std::copy (raw.begin() + warmUp, raw.end(), outTarget.begin());
+        return;
+    }
     auto chain = makeOfflineChain (sr);
     for (int i = 0; i < warmUp; ++i)          // the filters and envelopes settle first
         chain->process (raw[(size_t) i]);
-
-    int lastCol = -1;
-    for (int i = 0; i < shown; ++i)
-    {
-        const float di = raw[(size_t) (warmUp + i)];
-        const float y = chain->process (di) * chain->go;
-        const float out = pure ? di : y;
-        const int col = juce::jmin (scopeCols - 1, (int) ((juce::int64) i * scopeCols / shown));
-        auto& c = target[(size_t) col];
-        if (col != lastCol) { c = { di, di, out, out }; lastCol = col; }
-        else
-        {
-            c.diMin  = juce::jmin (c.diMin, di);   c.diMax  = juce::jmax (c.diMax, di);
-            c.outMin = juce::jmin (c.outMin, out); c.outMax = juce::jmax (c.outMax, out);
-        }
-    }
+    for (int i = warmUp; i < n; ++i)
+        outTarget[(size_t) (i - warmUp)] = chain->process (raw[(size_t) i]) * chain->go;
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

@@ -1,11 +1,11 @@
 // Dev tool: draws the plugin window into PNG files, for layout checks
-// without a DAW, and runs a HOLD check. Not part of the release.
+// without a DAW, and runs HOLD and preset checks. Not part of the release.
 // Build: -DBERRY_SNAPSHOT=ON
 //   BerryToneSnapshot <outDir>
 #include "../../Source/PluginEditor.h"
 #include <cstdio>
 
-// Feeds 1.5 s of a palm-muted low-E-like signal through the processor.
+// Feeds 1.5 s of palm-muted low-E-like chugs (with pauses) through the processor.
 static void feedAudio (BerryToneAudioProcessor& proc)
 {
     const double sr = 48000.0;
@@ -15,24 +15,20 @@ static void feedAudio (BerryToneAudioProcessor& proc)
     juce::AudioBuffer<float> buf (1, block);
     juce::MidiBuffer midi;
     int t = 0;
-    for (int b = 0; b < (int) (1.5 * sr) / block; ++b)
+    juce::Random rng (7);
+    for (int b = 0; b < (int) (1.58 * sr) / block; ++b)   // ends inside a chug
     {
         for (int i = 0; i < block; ++i, ++t)
         {
             const double sec = (double) t / sr;
-            const double env = std::exp (-6.0 * std::fmod (sec, 0.25));   // a chug every 250 ms
-            buf.setSample (0, i, (float) (0.4 * env * (std::sin (2.0 * juce::MathConstants<double>::pi * 41.2 * sec)
-                                                      + 0.5 * std::sin (2.0 * juce::MathConstants<double>::pi * 123.6 * sec))));
+            const double ph = std::fmod (sec, 0.375);
+            const double env = ph < 0.2 ? std::exp (-14.0 * ph) : 0.0;   // a chug, then a pause
+            const double w = 2.0 * juce::MathConstants<double>::pi * 41.2 * sec;
+            buf.setSample (0, i, (float) (0.4 * env * (std::sin (w) + 0.55 * std::sin (2 * w + 0.4) + 0.3 * std::sin (3 * w + 1.1)
+                                                       + 0.12 * std::sin (6 * w)) + 0.002 * (rng.nextFloat() - 0.5f)));
         }
         proc.processBlock (buf, midi);
     }
-}
-
-static float peakOut (const std::vector<BerryToneAudioProcessor::ScopeCol>& c)
-{
-    float p = 0.f;
-    for (auto& x : c) p = juce::jmax (p, -x.outMin, x.outMax);
-    return p;
 }
 
 static int holdCheck()
@@ -43,31 +39,49 @@ static int holdCheck()
     std::vector<float> raw;
     const double sr = proc.getScopeSampleRate();
     const int warm = (int) (0.3 * sr);
-    proc.readRawDi (raw, warm + (int) sr);
+    proc.readRaw (raw, nullptr, warm + (int) sr);
 
-    std::vector<BerryToneAudioProcessor::ScopeCol> a, b, c;
-    proc.renderHeld (raw, sr, warm, a);
+    std::vector<float> a, b, c;
+    proc.processHeld (raw, sr, warm, a);
 
     // change a module: output trim -12 dB
     auto* out = proc.apvts.getParameter (ID::outGain);
     out->setValueNotifyingHost (out->convertTo0to1 (-12.f));
-    proc.renderHeld (raw, sr, warm, b);
+    proc.processHeld (raw, sr, warm, b);
 
     // PURE DI: OUT = DI
     proc.pureDi = true;
-    proc.renderHeld (raw, sr, warm, c);
+    proc.processHeld (raw, sr, warm, c);
 
-    bool diSame = true, pureSame = true;
-    for (size_t i = 0; i < a.size(); ++i)
-    {
-        diSame   = diSame   && a[i].diMin == b[i].diMin && a[i].diMax == b[i].diMax;
-        pureSame = pureSame && c[i].outMin == c[i].diMin && c[i].outMax == c[i].diMax;
-    }
-    const float pa = peakOut (a), pb = peakOut (b);
+    auto peak = [] (const std::vector<float>& v) { float p = 0.f; for (auto x : v) p = juce::jmax (p, std::abs (x)); return p; };
+    bool pureSame = c.size() == raw.size() - (size_t) warm;
+    for (size_t i = 0; pureSame && i < c.size(); ++i) pureSame = c[i] == raw[i + (size_t) warm];
+    const float pa = peak (a), pb = peak (b);
     const float ratioDb = juce::Decibels::gainToDecibels (pb / juce::jmax (1.0e-9f, pa));
-    std::printf ("HOLD check: raw %d samples, DI unchanged=%s, OUT peak %.3f -> %.3f (%.1f dB, want about -12), PURE DI out==di=%s\n",
-                 (int) raw.size(), diSame ? "yes" : "NO", pa, pb, ratioDb, pureSame ? "yes" : "NO");
-    return (diSame && pureSame && std::abs (ratioDb + 12.f) < 0.5f && pa > 0.01f) ? 0 : 1;
+    std::printf ("HOLD check: raw %d samples, OUT peak %.3f -> %.3f (%.1f dB, want -12), PURE DI out==di=%s\n",
+                 (int) raw.size(), pa, pb, ratioDb, pureSame ? "yes" : "NO");
+    return (pureSame && std::abs (ratioDb + 12.f) < 0.5f && pa > 0.01f) ? 0 : 1;
+}
+
+static void snap (const juce::File& outDir, const juce::String& name, Design d, float scale,
+                  int scopeMode, int scopeTime, int scopeLevel, bool modulesOn)
+{
+    BerryToneAudioProcessor proc;
+    if (modulesOn)   // a chain that changes the signal: tightener, gate, impedance, tilt, destroyer
+        for (auto* id : { ID::tightOn, ID::gateOn, ID::impOn, ID::tiltOn })
+            proc.apvts.getParameter (id)->setValueNotifyingHost (1.f);
+    feedAudio (proc);              // so the scope shows a signal
+    proc.setDesign (d);
+    proc.uiScale = scale;
+    proc.apvts.state.setProperty ("scopeMode", scopeMode, nullptr);
+    proc.apvts.state.setProperty ("scopeTime", scopeTime, nullptr);
+    proc.apvts.state.setProperty ("scopeLevel", scopeLevel, nullptr);
+    std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+    auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+    juce::FileOutputStream out (outDir.getChildFile (name + ".png"));
+    out.setPosition (0); out.truncate();
+    juce::PNGImageFormat().writeImageToStream (img, out);
+    std::printf ("%s %dx%d\n", name.toRawUTF8(), ed->getWidth(), ed->getHeight());
 }
 
 int main (int argc, char** argv)
@@ -78,22 +92,17 @@ int main (int argc, char** argv)
 
     const int holdResult = holdCheck();
 
-    for (auto d : { Design::berry, Design::grape })
-        for (float s : { 1.0f, 1.25f, 0.8f })
-        {
-            BerryToneAudioProcessor proc;
-            feedAudio (proc);              // so the scope shows a signal
-            proc.setDesign (d);
-            proc.uiScale = s;
-            std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
-            auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
-            const auto name = juce::String (d == Design::grape ? "grape" : "berry") + "_" + juce::String (juce::roundToInt (s * 100)) + ".png";
-            juce::FileOutputStream out (outDir.getChildFile (name));
-            out.setPosition (0); out.truncate();
-            juce::PNGImageFormat().writeImageToStream (img, out);
-            std::printf ("%s %dx%d\n", name.toRawUTF8(), ed->getWidth(), ed->getHeight());
-            ed.reset();
-        }
+    // mode: 0 real, 1 flat, 2 spectrum   time: 0 1 s, 1 200 ms, 2 50 ms   level: 0 lin, 1 dB
+    snap (outDir, "berry_100",        Design::berry, 1.0f,  0, 0, 0, true);
+    snap (outDir, "grape_100",        Design::grape, 1.0f,  0, 0, 0, true);
+    snap (outDir, "berry_125",        Design::berry, 1.25f, 0, 0, 0, true);
+    snap (outDir, "berry_50ms_lin",   Design::berry, 1.0f,  0, 2, 0, true);
+    snap (outDir, "grape_50ms_lin",   Design::grape, 1.0f,  0, 2, 0, true);
+    snap (outDir, "berry_1s_db",      Design::berry, 1.0f,  0, 0, 1, true);
+    snap (outDir, "grape_200ms_db",   Design::grape, 1.0f,  0, 1, 1, true);
+    snap (outDir, "berry_spectrum",   Design::berry, 1.0f,  2, 0, 0, true);
+    snap (outDir, "grape_spectrum",   Design::grape, 1.0f,  2, 0, 0, true);
+    snap (outDir, "grape_flat",       Design::grape, 1.0f,  1, 0, 0, true);
 
     // preset list + first-launch preset
     BerryToneAudioProcessor proc;

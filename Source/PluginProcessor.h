@@ -115,12 +115,17 @@ public:
 
     // ---- HOLD ----------------------------------------------------------------
     // The audio thread keeps the newest raw DI samples (mono, before the input trim).
-    // HOLD copies them once; then renderHeld() sends that DI through a copy of the
+    // HOLD copies them once; then processHeld() sends that DI through a copy of the
     // current chain each time a module changes, so the held picture stays live.
     // Message thread only.
     double getScopeSampleRate() const { return scopeSr.load(); }
-    void readRawDi (std::vector<float>& target, int numSamples) const;
-    void renderHeld (const std::vector<float>& rawDi, double sr, int warmUp, std::vector<ScopeCol>& target) const;
+    // The newest numSamples of the raw DI and of the output (mono), oldest first.
+    // outTarget may be nullptr.
+    void readRaw (std::vector<float>& diTarget, std::vector<float>* outTarget, int numSamples) const;
+    // Sends rawDi through a copy of the current chain. The first warmUp samples
+    // only settle the filters. outTarget gets rawDi.size() - warmUp samples
+    // (output trim and PURE DI included).
+    void processHeld (const std::vector<float>& rawDi, double sr, int warmUp, std::vector<float>& outTarget) const;
     // Parameters + order + PURE DI. Changes when anything that touches the signal changes.
     std::vector<float> chainKey();
 
@@ -177,6 +182,7 @@ private:
     // raw DI ring for HOLD (lock-free: relaxed atomics, one writer)
     static constexpr int rawRing = 1 << 18;   // 262144 samples: 1 s + warm-up at up to 192 kHz
     std::vector<std::atomic<float>> rawBuf = std::vector<std::atomic<float>> ((size_t) rawRing);
+    std::vector<std::atomic<float>> rawOutBuf = std::vector<std::atomic<float>> ((size_t) rawRing);
     std::atomic<int> rawWrite { 0 };
     std::atomic<double> scopeSr { 48000.0 };
 

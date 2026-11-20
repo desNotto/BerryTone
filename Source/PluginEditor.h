@@ -97,7 +97,9 @@ private:
     Design design = Design::berry;
 
     ScopeView scope;
-    juce::TextButton modeReal { "REAL DI" }, modeFlat { "FLAT LINE" }, pureBtn, holdBtn { "HOLD" };
+    juce::TextButton modeReal { "REAL DI" }, modeSpec { "SPECTRUM" }, modeFlat { "FLAT LINE" }, pureBtn, holdBtn { "HOLD" };
+    juce::TextButton zoom1s { "1 s" }, zoom200 { "200 ms" }, zoom50 { "50 ms" }, lvlLin { "LIN" }, lvlDb { "dB" };
+    void updateScopeChips();
     juce::TextButton presetPrev, presetNext, presetName, saveBtn { "Save" }, saveAsBtn { "Save as" },
                      renameBtn { "Rename" }, deleteBtn { "Delete" };
     juce::TextButton updateBtn, resetBtn { "Reset order" }, size100 { "100%" }, size125 { "125%" };
@@ -107,7 +109,7 @@ private:
     juce::Component::SafePointer<juce::AlertWindow> progressDialog;
 
     juce::Rectangle<int> logoRect { 24, 20, 410, 80 }, scopeCard { 22, 104, 896, 150 },
-                         scopeScreen { 34, 116, 708, 126 }, inMeter, outMeter, gateLed;
+                         scopeScreen { 34, 116, 690, 126 }, inMeter, outMeter, gateLed;
     std::array<int, 7> order {};
     int dragId = -1;
     float inLvl = 0.f, outLvl = 0.f;
