@@ -28,6 +28,9 @@ if (-not $cmake) {
     $cmake = Join-Path $vs "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 }
 
+# JUCE makes the Windows version resource only once (it depends on the icon only).
+# Delete it, so the file version is the new version.
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $repo "build\BerryTone_artefacts\JuceLibraryCode\BerryTone_resources.rc")
 & $cmake -B build -G "Visual Studio 17 2022" -A x64 | Out-Null
 & $cmake --build build --config Release --parallel 8
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
