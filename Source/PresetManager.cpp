@@ -43,8 +43,14 @@ PresetManager::PresetManager (BerryToneAudioProcessor& p) : proc (p)
 
 juce::File PresetManager::getUserDir()
 {
+   #if JUCE_MAC
+    // ~/Library/Application Support/desNotto/BerryTone/Presets
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("Application Support").getChildFile ("desNotto").getChildFile ("BerryTone").getChildFile ("Presets");
+   #else
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                .getChildFile ("desNotto").getChildFile ("BerryTone").getChildFile ("Presets");
+   #endif
 }
 
 juce::String PresetManager::cleanName (const juce::String& n)

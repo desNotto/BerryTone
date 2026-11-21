@@ -30,6 +30,19 @@ namespace updater
     // script renames the old file (or an old bundle folder) first.
     juce::String makeInstallScript (const juce::File& src, const juce::File& dst, const juce::File& log);
 
+    // The release asset of this platform: "-win64.zip" (Windows) or "-mac.zip" (macOS).
+    const char* assetSuffix();
+
+    // macOS: a /bin/sh script that replaces each installed bundle (dst) with the new
+    // bundle (src). It renames the old bundle to "<name>.old<time>" first: the DAW
+    // can keep the loaded binary. It writes "OK" or "ERROR: ..." into log.
+    struct BundleSwap { juce::File src, dst; };
+    juce::String makeMacInstallScript (const juce::Array<BundleSwap>& items, const juce::File& log);
+
+    // macOS: the bundles to update. The running bundle, plus the BerryTone bundles in the
+    // standard plug-in folders (user and system). newVst3 / newAu are the unpacked bundles.
+    juce::Array<BundleSwap> findMacTargets (const juce::File& running, const juce::File& newVst3, const juce::File& newAu);
+
     class UpdateChecker : private juce::Thread
     {
     public:
@@ -69,6 +82,8 @@ namespace updater
         void finish (bool ok, const juce::String& msg);
         bool download (juce::File& zipOut, juce::String& err);
         bool runInstallScript (const juce::File& script, bool elevated, juce::String& err);
+        bool runProcess (const juce::StringArray& args, int timeoutMs, juce::String& output);
+        void runMac();
 
         ReleaseInfo rel;
         JUCE_DECLARE_WEAK_REFERENCEABLE (UpdateInstaller)

@@ -130,6 +130,51 @@ static int installScriptCheck()
    #endif
 }
 
+// macOS: runs the updater's /bin/sh install script on fake bundles.
+static int macInstallCheck()
+{
+   #if JUCE_MAC
+    auto root = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("BerryTone-mac-installtest");
+    root.deleteRecursively();
+    auto makeBundle = [] (const juce::File& b, const juce::String& content)
+    {
+        auto bin = b.getChildFile ("Contents/MacOS/BerryTone");
+        bin.getParentDirectory().createDirectory();
+        bin.replaceWithText (content);
+    };
+    auto newV = root.getChildFile ("new/BerryTone.vst3"), newA = root.getChildFile ("new/BerryTone.component");
+    makeBundle (newV, "NEW-VST3"); makeBundle (newA, "NEW-AU");
+
+    auto dstV = root.getChildFile ("Plug Ins/VST3/BerryTone.vst3");
+    auto dstA = root.getChildFile ("Plug Ins/Components/BerryTone.component");
+    auto dstQ = root.getChildFile ("it's new/VST3/BerryTone.vst3");   // no folder yet, ' in the path
+    makeBundle (dstV, "OLD"); makeBundle (dstA, "OLD");
+
+    // the running bundle is found from the binary path
+    const auto targets = updater::findMacTargets (dstV.getChildFile ("Contents/MacOS/BerryTone"), newV, newA);
+    const bool foundRunning = targets.size() >= 1 && targets[0].dst == dstV && targets[0].src == newV;
+
+    juce::Array<updater::BundleSwap> items { { newV, dstV }, { newA, dstA }, { newV, dstQ } };
+    auto log = root.getChildFile ("install.log");
+    auto script = root.getChildFile ("install.sh");
+    script.replaceWithText (updater::makeMacInstallScript (items, log));
+    juce::ChildProcess cp;
+    const bool started = cp.start (juce::StringArray { "/bin/sh", script.getFullPathName() });
+    if (started) cp.waitForProcessToFinish (60000);
+
+    auto content = [] (const juce::File& b) { return b.getChildFile ("Contents/MacOS/BerryTone").loadFileAsString(); };
+    const bool ok = started && cp.getExitCode() == 0 && log.loadFileAsString().trim() == "OK"
+                 && content (dstV) == "NEW-VST3" && content (dstA) == "NEW-AU" && content (dstQ) == "NEW-VST3"
+                 && dstV.getParentDirectory().findChildFiles (juce::File::findDirectories, false, "BerryTone.vst3.old*").size() == 1;
+    std::printf ("mac install: running bundle found %s, script %s, log: %s\n", foundRunning ? "yes" : "NO",
+                 ok ? "ok" : "FAILED", log.loadFileAsString().trim().toRawUTF8());
+    root.deleteRecursively();
+    return (ok && foundRunning) ? 0 : 1;
+   #else
+    return 0;
+   #endif
+}
+
 static void snap (const juce::File& outDir, const juce::String& name, Design d, float scale,
                   int scopeMode, int scopeTime, int scopeLevel, bool modulesOn,
                   int hintModule = -1, int hintKnob = -1)
@@ -163,7 +208,7 @@ int main (int argc, char** argv)
     outDir.createDirectory();
 
     const int holdResult = holdCheck();
-    const int installFailures = installScriptCheck();
+    const int installFailures = installScriptCheck() + macInstallCheck();
 
     // mode: 0 real, 1 flat, 2 spectrum   time: 0 1 s, 1 200 ms, 2 50 ms   level: 0 lin, 1 dB
     snap (outDir, "berry_100",        Design::berry, 1.0f,  0, 0, 0, true);

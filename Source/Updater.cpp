@@ -76,10 +76,12 @@ void UpdateChecker::run()
     r.pageUrl = json["html_url"].toString();
     if (auto* assets = json["assets"].getArray())
         for (auto& a : *assets)
-            if (a["name"].toString().endsWithIgnoreCase ("-win64.zip"))
+            if (a["name"].toString().endsWithIgnoreCase (assetSuffix()))
                 r.assetUrl = a["browser_download_url"].toString();
 
-    if (r.version.isEmpty() || ! isNewer (r.version, JucePlugin_VersionString))
+    // No file for this platform yet (the macOS build can come some minutes after the
+    // release): do not offer the update now. The next start checks again.
+    if (r.version.isEmpty() || r.assetUrl.isEmpty() || ! isNewer (r.version, JucePlugin_VersionString))
         return;
 
     {
@@ -171,6 +173,79 @@ static bool canWriteTo (juce::File dir)
 }
 
 static juce::String psQuote (const juce::String& s) { return "'" + s.replace ("'", "''") + "'"; }
+static juce::String shQuote (const juce::String& s) { return "'" + s.replace ("'", "'\\''") + "'"; }
+
+const char* assetSuffix()
+{
+   #if JUCE_MAC
+    return "-mac.zip";
+   #else
+    return "-win64.zip";
+   #endif
+}
+
+juce::String makeMacInstallScript (const juce::Array<BundleSwap>& items, const juce::File& log)
+{
+    juce::String sh;
+    sh << "#!/bin/sh\n"
+       << "LOG=" << shQuote (log.getFullPathName()) << "\n"
+       << "fail() { echo \"ERROR: $1\" > \"$LOG\"; exit 1; }\n"
+       << "swap() {\n"
+       << "  src=\"$1\"; dst=\"$2\"\n"
+       << "  dir=$(dirname \"$dst\"); leaf=$(basename \"$dst\")\n"
+       << "  mkdir -p \"$dir\" || fail \"cannot create $dir\"\n"
+       << "  rm -rf \"$dir/$leaf\".old* 2>/dev/null\n"
+       << "  if [ -e \"$dst\" ]; then mv \"$dst\" \"$dst.old$(date +%Y%m%d%H%M%S)\" || fail \"cannot move $dst\"; fi\n"
+       << "  /usr/bin/ditto \"$src\" \"$dst\" || fail \"cannot copy to $dst\"\n"
+       << "  /usr/bin/xattr -dr com.apple.quarantine \"$dst\" 2>/dev/null\n"
+       << "  return 0\n"
+       << "}\n";
+    for (auto& it : items)
+        sh << "swap " << shQuote (it.src.getFullPathName()) << " " << shQuote (it.dst.getFullPathName()) << "\n";
+    sh << "echo OK > \"$LOG\"\n"
+       << "exit 0\n";
+    return sh;
+}
+
+static juce::File bundleOf (juce::File f)
+{
+    // .../BerryTone.vst3/Contents/MacOS/BerryTone -> .../BerryTone.vst3
+    for (int i = 0; i < 5 && f != juce::File(); ++i, f = f.getParentDirectory())
+        if (f.hasFileExtension (".vst3;.component") && f.isDirectory())
+            return f;
+    return {};
+}
+
+juce::Array<BundleSwap> findMacTargets (const juce::File& running, const juce::File& newVst3, const juce::File& newAu)
+{
+    juce::Array<BundleSwap> out;
+    auto add = [&] (const juce::File& dst)
+    {
+        const auto& src = dst.hasFileExtension (".component") ? newAu : newVst3;
+        if (! src.isDirectory()) return;
+        for (auto& it : out) if (it.dst == dst) return;
+        out.add ({ src, dst });
+    };
+
+    const auto runningBundle = bundleOf (running);
+    if (runningBundle != juce::File())
+        add (runningBundle);
+
+    const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+    for (auto root : { home.getChildFile ("Library/Audio/Plug-Ins"), juce::File ("/Library/Audio/Plug-Ins") })
+    {
+        auto v = root.getChildFile ("VST3/BerryTone.vst3"), c = root.getChildFile ("Components/BerryTone.component");
+        if (v.isDirectory()) add (v);
+        if (c.isDirectory()) add (c);
+    }
+
+    if (out.isEmpty())   // nothing found: install both formats for this user
+    {
+        add (home.getChildFile ("Library/Audio/Plug-Ins/VST3/BerryTone.vst3"));
+        add (home.getChildFile ("Library/Audio/Plug-Ins/Components/BerryTone.component"));
+    }
+    return out;
+}
 
 juce::String makeInstallScript (const juce::File& src, const juce::File& dst, const juce::File& log)
 {
@@ -236,10 +311,91 @@ bool UpdateInstaller::runInstallScript (const juce::File& script, bool elevated,
    #endif
 }
 
+bool UpdateInstaller::runProcess (const juce::StringArray& args, int timeoutMs, juce::String& output)
+{
+    juce::ChildProcess cp;
+    if (! cp.start (args))
+        return false;
+    for (int waited = 0; cp.isRunning(); waited += 100)
+    {
+        if (threadShouldExit() || waited > timeoutMs) { cp.kill(); return false; }
+        juce::Thread::sleep (100);
+    }
+    output = cp.readAllProcessOutput();
+    return cp.getExitCode() == 0;
+}
+
+void UpdateInstaller::runMac()
+{
+    if (rel.assetUrl.isEmpty())
+        return finish (false, "This release has no macOS file yet. Open the release page.");
+
+    auto root = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("BerryTone-update");
+    root.deleteRecursively();
+    if (! root.createDirectory())
+        return finish (false, "Cannot create the folder " + root.getFullPathName());
+
+    // 1. download
+    auto zipFile = root.getChildFile ("BerryTone-v" + rel.version + "-mac.zip");
+    juce::String err, out;
+    if (! download (zipFile, err))
+        return finish (false, err);
+
+    // 2. unpack with ditto: it keeps the bundle structure, the permissions and the signature
+    progress = -1.0;
+    auto unpacked = root.getChildFile ("files");
+    unpacked.createDirectory();
+    if (! runProcess ({ "/usr/bin/ditto", "-x", "-k", zipFile.getFullPathName(), unpacked.getFullPathName() }, 120000, out))
+        return finish (false, "Cannot unpack the update.");
+
+    juce::File newVst3, newAu;
+    for (auto& f : unpacked.findChildFiles (juce::File::findDirectories, true, "BerryTone.vst3"))      { newVst3 = f; break; }
+    for (auto& f : unpacked.findChildFiles (juce::File::findDirectories, true, "BerryTone.component")) { newAu = f; break; }
+    if (! newVst3.isDirectory() && ! newAu.isDirectory())
+        return finish (false, "The update has no plugin bundle.");
+
+    // 3. the installed bundles
+    const auto items = findMacTargets (juce::File::getSpecialLocation (juce::File::currentExecutableFile), newVst3, newAu);
+    if (items.isEmpty())
+        return finish (false, "Cannot find the installed plugin.");
+
+    // 4. write and run the install script (as administrator when a folder needs it)
+    auto log = root.getChildFile ("install.log");
+    auto script = root.getChildFile ("install.sh");
+    if (! script.replaceWithText (makeMacInstallScript (items, log)))
+        return finish (false, "Cannot write the install script.");
+
+    bool elevated = false;
+    for (auto& it : items)
+        elevated = elevated || ! canWriteTo (it.dst.getParentDirectory());
+
+    juce::StringArray args;
+    if (elevated)
+        args = { "/usr/bin/osascript", "-e",
+                 "do shell script \"/bin/sh \" & quoted form of \"" + script.getFullPathName() + "\" with administrator privileges" };
+    else
+        args = { "/bin/sh", script.getFullPathName() };
+
+    const bool ok = runProcess (args, 300000, out);
+    const auto logText = log.existsAsFile() ? log.loadFileAsString().trim() : juce::String();
+    if (! ok || logText != "OK")
+        return finish (false, logText.isNotEmpty() ? logText
+                                                   : (elevated ? juce::String ("The install was canceled (no admin rights).")
+                                                               : juce::String ("The install script failed.")));
+
+    juce::String where;
+    for (auto& it : items) where << it.dst.getFullPathName() << "\n";
+    progress = 1.0;
+    finish (true, "BerryTone v" + rel.version + " is installed in:\n" + where + "\nRestart the DAW to use the new version.");
+}
+
 void UpdateInstaller::run()
 {
-   #if ! JUCE_WINDOWS
-    finish (false, "Automatic install works on Windows only. Download the update from the release page.");
+   #if JUCE_MAC
+    runMac();
+    return;
+   #elif ! JUCE_WINDOWS
+    finish (false, "Automatic install works on Windows and macOS only. Download the update from the release page.");
     return;
    #else
     if (rel.assetUrl.isEmpty())

@@ -1,0 +1,89 @@
+# macOS build of BerryTone (VST3 + AU, universal: arm64 + x86_64).
+# - A published GitHub release starts it. It builds the release tag and uploads
+#   BerryTone-v<version>-mac.zip to the release. The plugin updater on macOS downloads this file.
+# - Run it by hand (Actions > macOS build > Run workflow) to build only, or give a tag to upload.
+name: macOS build
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and upload to (empty = build and check only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-14
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+
+      - name: Version
+        id: ver
+        run: echo "version=$(sed -nE 's/.*set\(BERRY_VERSION ([0-9.]+)\).*/\1/p' CMakeLists.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure
+        run: >
+          cmake -B build -G Xcode
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+          -DBERRY_SNAPSHOT=ON
+
+      - name: Build VST3 and AU
+        run: cmake --build build --config Release --target BerryTone_VST3 BerryTone_AU -- -quiet
+
+      - name: Checks (HOLD, install script, presets)
+        run: |
+          cmake --build build --config Release --target BerryToneSnapshot -- -quiet
+          TOOL=$(find build -type f -name BerryToneSnapshot -perm -u+x | head -1)
+          mkdir -p snaps
+          "$TOOL" "$PWD/snaps"
+
+      - name: Sign (ad hoc) and zip
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          ART=build/BerryTone_artefacts/Release
+          rm -rf out && mkdir out
+          ditto "$ART/VST3/BerryTone.vst3" out/BerryTone.vst3
+          ditto "$ART/AU/BerryTone.component" out/BerryTone.component
+          codesign --force --deep --sign - out/BerryTone.vst3
+          codesign --force --deep --sign - out/BerryTone.component
+          lipo -info out/BerryTone.vst3/Contents/MacOS/BerryTone
+          cat > out/README.txt <<EOF
+          BerryTone v$V for macOS (VST3 + AU, Apple Silicon and Intel) - by desNotto
+          https://github.com/desNotto/BerryTone
+
+          Install
+          1. Copy BerryTone.vst3 to ~/Library/Audio/Plug-Ins/VST3
+          2. Copy BerryTone.component to ~/Library/Audio/Plug-Ins/Components
+          3. The plugin is not notarized. Open Terminal and run:
+             xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/BerryTone.vst3 ~/Library/Audio/Plug-Ins/Components/BerryTone.component
+          4. Restart the DAW and scan the plugins.
+          Next updates: click "Update to ..." at the bottom of the plugin window.
+          EOF
+          (cd out && zip -qry "../BerryTone-v$V-mac.zip" BerryTone.vst3 BerryTone.component README.txt)
+          ls -l "BerryTone-v$V-mac.zip"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: BerryTone-mac-${{ steps.ver.outputs.version }}
+          path: |
+            BerryTone-v*-mac.zip
+            snaps/*.png
+          if-no-files-found: warn
+
+      - name: Upload to the release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "BerryTone-v${{ steps.ver.outputs.version }}-mac.zip" --clobber --repo "$GITHUB_REPOSITORY"
