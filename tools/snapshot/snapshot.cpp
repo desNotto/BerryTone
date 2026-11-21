@@ -160,7 +160,7 @@ static int macInstallCheck()
     items.add ({ newV, dstQ });
     auto log = root.getChildFile ("install.log");
     auto script = root.getChildFile ("install.sh");
-    script.replaceWithText (updater::makeMacInstallScript (items, log));
+    script.replaceWithText (updater::makeMacInstallScript (items, log), false, false, "\n");   // sh needs LF line ends
     juce::ChildProcess cp;
     const bool started = cp.start (juce::StringArray { "/bin/sh", script.getFullPathName() });
     if (started) cp.waitForProcessToFinish (60000);

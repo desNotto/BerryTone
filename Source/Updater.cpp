@@ -362,7 +362,7 @@ void UpdateInstaller::runMac()
     // 4. write and run the install script (as administrator when a folder needs it)
     auto log = root.getChildFile ("install.log");
     auto script = root.getChildFile ("install.sh");
-    if (! script.replaceWithText (makeMacInstallScript (items, log)))
+    if (! script.replaceWithText (makeMacInstallScript (items, log), false, false, "\n"))
         return finish (false, "Cannot write the install script.");
 
     bool elevated = false;
