@@ -154,7 +154,10 @@ static int macInstallCheck()
     const auto targets = updater::findMacTargets (dstV.getChildFile ("Contents/MacOS/BerryTone"), newV, newA);
     const bool foundRunning = targets.size() >= 1 && targets[0].dst == dstV && targets[0].src == newV;
 
-    juce::Array<updater::BundleSwap> items { { newV, dstV }, { newA, dstA }, { newV, dstQ } };
+    juce::Array<updater::BundleSwap> items;
+    items.add ({ newV, dstV });
+    items.add ({ newA, dstA });
+    items.add ({ newV, dstQ });
     auto log = root.getChildFile ("install.log");
     auto script = root.getChildFile ("install.sh");
     script.replaceWithText (updater::makeMacInstallScript (items, log));

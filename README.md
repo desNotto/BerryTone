@@ -3,17 +3,30 @@
 BerryTone is a signal conditioner for low-tuned electric guitar (7, 8 and 9 strings, drop tunings, baritone).
 Put it before your amp simulator. It makes the DI signal tight and clear before the amp gets it.
 
-- Format: VST3 for Windows (AU for macOS when you build it on a Mac). There is no Standalone version.
+- Formats: VST3 for Windows. VST3 and AU for macOS (Apple Silicon and Intel). There is no Standalone version.
 - Latency: 0 samples.
 - Author: **desNotto**.
 
 ## Install
+
+### Windows
 1. Download `BerryTone-v<version>-win64.zip` from the [Releases](https://github.com/desNotto/BerryTone/releases) page.
-2. Copy the file `BerryTone.vst3` to `C:\Program Files\Common Files\VST3`.
+2. Copy the file `BerryTone.vst3` to `C:\Program Files\Common Files\VST3` (or to the VST3 folder of your DAW).
 3. Start your DAW. Scan the plugins again.
 
 `BerryTone.vst3` is one file, not a folder. Some DAWs do not find the plugin when it is a folder.
-For the next versions, use the update button in the plugin (see [Updates](#updates)).
+
+### macOS
+1. Download `BerryTone-v<version>-mac.zip` from the [Releases](https://github.com/desNotto/BerryTone/releases) page.
+2. Copy `BerryTone.vst3` to `~/Library/Audio/Plug-Ins/VST3`.
+3. Copy `BerryTone.component` to `~/Library/Audio/Plug-Ins/Components`.
+4. The plugin is not notarized. macOS blocks files from a browser download. Open Terminal and run this command one time:
+   ```
+   xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/BerryTone.vst3 ~/Library/Audio/Plug-Ins/Components/BerryTone.component
+   ```
+5. Start your DAW. Scan the plugins again.
+
+For the next versions, use the update button in the plugin (see [Updates](#updates)). The update button works on Windows and on macOS.
 
 ## Quick start
 1. Put BerryTone on the guitar track, before the amp simulator.
@@ -196,7 +209,11 @@ Factory presets:
 
 You cannot change or delete factory presets. Use Save as.
 
-User presets are files in `%APPDATA%\desNotto\BerryTone\Presets` (`*.btpreset`). The preset menu has "Open presets folder". A user preset file with the name of a factory preset does not show in the list.
+User presets are files (`*.btpreset`) in this folder:
+- Windows: `%APPDATA%\desNotto\BerryTone\Presets`
+- macOS: `~/Library/Application Support/desNotto/BerryTone/Presets`
+
+ The preset menu has "Open presets folder". A user preset file with the name of a factory preset does not show in the list.
 
 ## Designs and window size
 - Click the logo to change the design: **Berry** (juice box) or **Grape** (dark). The preset stores the design.
@@ -206,10 +223,13 @@ User presets are files in `%APPDATA%\desNotto\BerryTone\Presets` (`*.btpreset`).
 
 ## Updates
 1. The plugin reads the latest release on GitHub when it starts.
-2. When a newer version exists, the button **Update to vX** shows at the bottom left.
+2. When a newer version for your system exists, the button **Update to vX** shows at the right end of the hint line.
 3. Click the button. Read the release notes. Click **Install**.
-4. Windows asks for administrator rights when the plugin folder needs them.
+4. The system asks for administrator rights when the plugin folder needs them.
 5. Restart the DAW.
+
+On Windows, the updater replaces the `BerryTone.vst3` file that the DAW loaded.
+On macOS, the updater replaces the bundle that the DAW loaded. It also replaces `BerryTone.vst3` and `BerryTone.component` in `~/Library/Audio/Plug-Ins` and `/Library/Audio/Plug-Ins`. The old bundle gets the name `BerryTone.<ext>.old<time>`. The DAW does not load it.
 
 ## Latency
 BerryTone reports 0 samples of latency. The audio path uses only IIR filters, envelope followers and sample-by-sample processing. There is no lookahead, no FFT and no oversampling in the audio path. The DI Scope uses an FFT on the user-interface thread only.
@@ -231,11 +251,19 @@ Layout check without a DAW: configure with `-DBERRY_SNAPSHOT=ON` and build the t
 ## Release
 1. Change the version in `CMakeLists.txt` (`BERRY_VERSION`).
 2. Commit the changes.
-3. Run `tools/make_release.ps1 -Publish` in PowerShell 7.
+3. Run `tools/make_release.ps1 -Publish` in PowerShell 7 on Windows.
+4. The GitHub release starts the workflow **macOS build** (`.github/workflows/mac.yml`). It builds VST3 and AU on a macOS runner, runs the checks and adds `BerryTone-v<version>-mac.zip` to the release (about 15 minutes).
+5. Until the Mac file is in the release, macOS plugins do not show the update.
+6. Add `-WaitMac` to the script: it waits for the Mac file and downloads it into the local release folder.
 
 The script builds the plugin and writes `BerryTone-v<version>` (the VST3 file and the zip) into the `Releases` folder next to the repository. With `-Publish`, it also makes the git tag and the GitHub release. The zip name must end with `-win64.zip`, because the updater looks for this name.
 
 ## Version history
+
+### 1.3.1
+- macOS version: VST3 and AU, Apple Silicon and Intel. GitHub Actions builds it for each release.
+- The update button works on macOS.
+- An update shows only when the release has a file for your system.
 
 ### 1.3.0
 - New hint line at the bottom of the window: a module hint on the card, a knob hint on the knob.

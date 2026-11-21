@@ -4,12 +4,15 @@
 #    (BerryTone.vst3 = the plugin DLL). Some DAWs do not find the bundle folder.
 # 3. Makes BerryTone-v<version>-win64.zip (the plugin updater downloads this file).
 # 4. With -Publish: makes the git tag and the GitHub release (needs gh).
+#    The release starts the GitHub workflow "macOS build": it adds BerryTone-v<version>-mac.zip.
+# 5. With -WaitMac: waits for that file (up to 40 min) and downloads it into the release folder.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\make_release.ps1
 #   powershell -ExecutionPolicy Bypass -File tools\make_release.ps1 -Publish
 param(
     [string]$ReleaseRoot = (Join-Path $PSScriptRoot "..\..\Releases"),
     [switch]$Publish,
+    [switch]$WaitMac,
     [string]$Notes = ""
 )
 $ErrorActionPreference = "Stop"
@@ -62,5 +65,21 @@ if ($Publish) {
     if (-not $Notes) { $Notes = "BerryTone v$version" }
     gh release create "v$version" $zip --repo desNotto/BerryTone --title "BerryTone v$version" --notes $Notes
     if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
-    Write-Host "Published v$version on GitHub."
+    Write-Host "Published v$version on GitHub. The macOS build starts now (GitHub Actions)."
+}
+
+if ($WaitMac) {
+    $macZip = "BerryTone-v$version-mac.zip"
+    Write-Host "Waiting for $macZip ..."
+    $deadline = (Get-Date).AddMinutes(40)
+    while ((Get-Date) -lt $deadline) {
+        $names = gh release view "v$version" --repo desNotto/BerryTone --json assets -q '.assets[].name'
+        if ($names -contains $macZip) {
+            gh release download "v$version" --repo desNotto/BerryTone -p $macZip -D $out --clobber
+            Write-Host "Downloaded $macZip into $out"
+            break
+        }
+        Start-Sleep -Seconds 30
+    }
+    if (-not (Test-Path (Join-Path $out $macZip))) { throw "$macZip is not in the release. Check GitHub Actions." }
 }
