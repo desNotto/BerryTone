@@ -85,6 +85,7 @@ public:
     static void drawGrapeCluster (juce::Graphics&, float x, float y, float scale);
     static void drawLeaf (juce::Graphics&, juce::Point<float> base, juce::Point<float> tip, float width, juce::Colour);
     static void drawGlow (juce::Graphics&, const juce::Path&, juce::Colour, float radius);
+    static void drawFlag (juce::Graphics&, juce::Rectangle<float>, bool russia);
 
 private:
     Design design = Design::berry;

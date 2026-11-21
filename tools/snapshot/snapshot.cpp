@@ -131,7 +131,8 @@ static int installScriptCheck()
 }
 
 static void snap (const juce::File& outDir, const juce::String& name, Design d, float scale,
-                  int scopeMode, int scopeTime, int scopeLevel, bool modulesOn)
+                  int scopeMode, int scopeTime, int scopeLevel, bool modulesOn,
+                  int hintModule = -1, int hintKnob = -1)
 {
     BerryToneAudioProcessor proc;
     if (modulesOn)   // a chain that changes the signal: tightener, gate, impedance, tilt, destroyer
@@ -144,6 +145,10 @@ static void snap (const juce::File& outDir, const juce::String& name, Design d, 
     proc.apvts.state.setProperty ("scopeTime", scopeTime, nullptr);
     proc.apvts.state.setProperty ("scopeLevel", scopeLevel, nullptr);
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+    if (hintModule >= 0)
+        for (auto* c : ed->getChildren())
+            if (auto* v = dynamic_cast<BerryToneView*> (c))
+                v->showHintForTest (hintModule, hintKnob);
     auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
     juce::FileOutputStream out (outDir.getChildFile (name + ".png"));
     out.setPosition (0); out.truncate();
@@ -171,6 +176,17 @@ int main (int argc, char** argv)
     snap (outDir, "berry_spectrum",   Design::berry, 1.0f,  2, 0, 0, true);
     snap (outDir, "grape_spectrum",   Design::grape, 1.0f,  2, 0, 0, true);
     snap (outDir, "grape_flat",       Design::grape, 1.0f,  1, 0, 0, true);
+
+    // hint line: knob and module hints in both languages (the user's choice is restored)
+    const auto userLang = hints::getLang();
+    hints::setLang (hints::Lang::ru);
+    snap (outDir, "berry_hint_knob_ru",   Design::berry, 1.0f, 0, 0, 0, true, 5, 0);   // Tone Tilt: Tilt
+    snap (outDir, "grape_hint_module_ru", Design::grape, 1.0f, 0, 0, 0, true, 6, -1);  // Sound Destroyer
+    snap (outDir, "berry_hint_idle_ru",   Design::berry, 1.0f, 0, 0, 0, true);
+    hints::setLang (hints::Lang::en);
+    snap (outDir, "grape_hint_knob_en",   Design::grape, 1.0f, 0, 0, 0, true, 3, 2);   // Octave: Track
+    snap (outDir, "berry_hint_module_en", Design::berry, 1.0f, 0, 0, 0, true, 5, -1);  // Tone Tilt
+    hints::setLang (userLang);
 
     // preset list + first-launch preset
     BerryToneAudioProcessor proc;

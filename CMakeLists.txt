@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 # The version lives here. Release builds can override it: -DBERRY_VERSION=x.y.z
 if(NOT DEFINED BERRY_VERSION)
-    set(BERRY_VERSION 1.2.1)
+    set(BERRY_VERSION 1.3.0)
 endif()
 project(BerryTone VERSION ${BERRY_VERSION})
 
@@ -50,7 +50,14 @@ target_sources(BerryTone PRIVATE
     Source/PresetManager.h
     Source/PresetManager.cpp
     Source/Updater.h
-    Source/Updater.cpp)
+    Source/Updater.cpp
+    Source/Hints.h
+    Source/Hints.cpp)
+
+# Hints.cpp holds Russian text in UTF-8
+if(MSVC)
+    target_compile_options(BerryTone PRIVATE /utf-8)
+endif()
 
 target_compile_definitions(BerryTone PUBLIC
     JUCE_WEB_BROWSER=0

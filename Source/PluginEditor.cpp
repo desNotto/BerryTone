@@ -134,6 +134,27 @@ BerryToneView::BerryToneView (BerryToneAudioProcessor& p)
         applyOrder();
     };
 
+    // hint language (the hint line only). A user setting for all instances.
+    styleButton (langRu, "flag");
+    styleButton (langEn, "flag");
+    langRu.getProperties().set ("flag", "ru");
+    langEn.getProperties().set ("flag", "en");
+    langRu.setConnectedEdges (juce::Button::ConnectedOnRight);
+    langEn.setConnectedEdges (juce::Button::ConnectedOnLeft);
+    langRu.setTooltip (juce::String::fromUTF8 ("Подсказки на русском"));
+    langEn.setTooltip ("Hints in English");
+    auto setLang = [this] (hints::Lang l)
+    {
+        hints::setLang (l);
+        langRu.setToggleState (l == hints::Lang::ru, juce::dontSendNotification);
+        langEn.setToggleState (l == hints::Lang::en, juce::dontSendNotification);
+        repaint (hintBarBounds().expanded (4));
+    };
+    langRu.onClick = [setLang] { setLang (hints::Lang::ru); };
+    langEn.onClick = [setLang] { setLang (hints::Lang::en); };
+    langRu.setToggleState (hints::getLang() == hints::Lang::ru, juce::dontSendNotification);
+    langEn.setToggleState (hints::getLang() == hints::Lang::en, juce::dontSendNotification);
+
     // window size: 100 % / 125 %. The window edge gives any size in between.
     styleButton (size100, "size");
     styleButton (size125, "size");
@@ -275,10 +296,13 @@ void BerryToneView::resized()
     }
 
     // footer
-    updateBtn.setBounds (72, 662, grape ? 140 : 128, grape ? 22 : 20);
+    // the update button sits at the right end of the hint line, in place of the version
+    updateBtn.setBounds (grape ? 506 : 512, grape ? 662 : 663, grape ? 124 : 118, grape ? 22 : 20);
     resetBtn.setBounds (getWidth() - 22 - 96, 663, 96, grape ? 22 : 20);
-    size100.setBounds (722, grape ? 663 : 664, 46, grape ? 22 : 20);
-    size125.setBounds (768, grape ? 663 : 664, 46, grape ? 22 : 20);
+    langRu.setBounds (644, grape ? 663 : 664, 34, grape ? 22 : 20);
+    langEn.setBounds (678, grape ? 663 : 664, 34, grape ? 22 : 20);
+    size100.setBounds (720, grape ? 663 : 664, 46, grape ? 22 : 20);
+    size125.setBounds (766, grape ? 663 : 664, 46, grape ? 22 : 20);
 
     // module cards
     for (auto& mp : modules)
@@ -604,11 +628,7 @@ void BerryToneView::paintBerry (juce::Graphics& g)
     g.drawEllipse (gateLed.toFloat(), 1.f);
 
     // footer
-    g.setFont (F::font (10.5f));
-    g.setColour (cream.withAlpha (0.6f));
-    g.drawText ("v" JucePlugin_VersionString, 22, 663, 48, 20, juce::Justification::centredLeft);
-    g.drawFittedText ("DRAG A CARD HEADER TO REORDER  -  CLICK THE LOGO TO CHANGE THE LOOK",
-                      216, 663, 496, 20, juce::Justification::centred, 1, 0.9f);
+    paintHintBar (g);
 }
 
 //==============================================================================
@@ -771,18 +791,125 @@ void BerryToneView::paintGrape (juce::Graphics& g)
     g.drawEllipse (led, 1.f);
 
     // footer
-    g.setFont (F::font (10.5f, true, 0.08f));
-    g.setColour (muted);
-    g.drawText ("v" JucePlugin_VersionString, 22, 663, 48, 22, juce::Justification::centredLeft);
-    g.setColour (dim);
-    g.setFont (F::font (10.f, true, 0.1f));
-    g.drawFittedText ("DRAG A PANEL HEADER TO REORDER  -  CLICK THE LOGO TO CHANGE THE LOOK",
-                      216, 663, 496, 22, juce::Justification::centred, 1, 0.9f);
+    paintHintBar (g);
+}
+
+//==============================================================================
+// Hint line
+juce::Rectangle<int> BerryToneView::hintBarBounds() const
+{
+    return design == Design::grape ? juce::Rectangle<int> (22, 659, 614, 28) : juce::Rectangle<int> (22, 660, 614, 26);
+}
+
+void BerryToneView::paintHintBar (juce::Graphics& g)
+{
+    const bool grape = design == Design::grape;
+    const auto bar = hintBarBounds().toFloat();
+    if (grape)
+    {
+        using namespace grapecol;
+        g.setGradientFill (juce::ColourGradient::vertical (panelTop, bar.getY(), panelBot, bar.getBottom()));
+        g.fillRoundedRectangle (bar, 6.f);
+        g.setColour (border);
+        g.drawRoundedRectangle (bar.reduced (0.5f), 6.f, 1.f);
+        F::drawGrapeIcon (g, { bar.getX() + 12.f, bar.getCentreY() - 6.5f, 12.f, 13.f }, accent);
+    }
+    else
+    {
+        juce::Path p;
+        p.addRoundedRectangle (bar, bar.getHeight() * 0.5f);
+        juce::DropShadow (juce::Colours::black.withAlpha (0.25f), 6, { 0, 2 }).drawForPath (g, p);
+        g.setColour (berrycol::cream.withAlpha (0.93f));
+        g.fillPath (p);
+        F::drawBerry (g, bar.getX() + 19.f, bar.getCentreY() + 0.5f, 5.5f);
+    }
+
+    // right end: the version, or the update button
+    float right = bar.getRight() - 12.f;
+    if (updateBtn.isVisible())
+        right = (float) updateBtn.getX() - 8.f;
+    else
+    {
+        g.setFont (F::font (10.f, true, grape ? 0.08f : 0.f));
+        g.setColour (grape ? grapecol::muted : berrycol::deep.withAlpha (0.55f));
+        const juce::String v ("v" JucePlugin_VersionString);
+        const float vw = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), v);
+        g.drawText (v, juce::Rectangle<float> (right - vw, bar.getY(), vw + 2.f, bar.getHeight()), juce::Justification::centredRight);
+        right -= vw + 10.f;
+    }
+
+    const auto lang = hints::getLang();
+    juce::String name, text;
+    if (hintModule >= 0 && hintModule < (int) modules.size())
+    {
+        const auto& m = *modules[(size_t) hintModule];
+        if (hintKnob >= 0 && hintKnob < (int) m.knobs.size())
+        {
+            name = m.knobs[(size_t) hintKnob]->label.getText().toUpperCase();
+            text = hints::knobText (lang, m.id, hintKnob);
+        }
+        else
+        {
+            name = m.title.toUpperCase();
+            text = hints::moduleText (lang, m.id);
+        }
+    }
+    else
+        text = hints::idleText (lang);
+
+    float x = bar.getX() + (grape ? 32.f : 31.f);
+    const auto accentC = grape ? grapecol::trace : berrycol::pink;
+    if (name.isNotEmpty())
+    {
+        g.setFont (F::font (11.f, true, grape ? 0.08f : 0.02f));
+        const juce::String head = name + juce::String::fromUTF8 ("  —  ");   // name + em dash
+        const float hw = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), head);
+        g.setColour (accentC);
+        g.drawText (head, juce::Rectangle<float> (x, bar.getY(), hw + 2.f, bar.getHeight()), juce::Justification::centredLeft);
+        x += hw;
+    }
+    g.setFont (F::font (11.f, false));
+    g.setColour (grape ? grapecol::text : berrycol::deep);
+    g.drawText (text, juce::Rectangle<float> (x, bar.getY(), juce::jmax (0.f, right - x), bar.getHeight()),
+                juce::Justification::centredLeft, true);
+}
+
+void BerryToneView::updateHint()
+{
+    int mod = -1, knob = -1;
+    const bool dialogOpen = juce::Component::getCurrentlyModalComponent() != nullptr;
+    if (isShowing() && ! dialogOpen && isMouseOver (true))
+    {
+        const auto p = getLocalPoint (nullptr, juce::Desktop::getInstance().getMainMouseSource().getScreenPosition()).toInt();
+        for (auto& mp : modules)
+        {
+            const auto& m = *mp;
+            if (! m.bounds.contains (p)) continue;
+            mod = (int) (&mp - &modules[0]);
+            for (size_t k = 0; k < m.knobs.size(); ++k)
+                if (m.knobs[k]->slider.getBounds().contains (p) || m.knobs[k]->label.getBounds().contains (p))
+                    knob = (int) k;
+            break;
+        }
+    }
+    // a knob drag keeps its hint, also when the mouse leaves the knob
+    for (size_t i = 0; i < modules.size(); ++i)
+        for (size_t k = 0; k < modules[i]->knobs.size(); ++k)
+            if (modules[i]->knobs[k]->slider.isMouseButtonDown()) { mod = (int) i; knob = (int) k; }
+
+    if (mod != hintModule || knob != hintKnob)
+    {
+        hintModule = mod;
+        hintKnob = knob;
+        repaint (hintBarBounds().expanded (4));
+    }
 }
 
 //==============================================================================
 void BerryToneView::timerCallback()
 {
+    updateHint();
+
     auto norm = [] (float lin)
     {
         return juce::jlimit (0.f, 1.f, (juce::Decibels::gainToDecibels (lin, -60.f) + 60.f) / 60.f);
@@ -842,6 +969,7 @@ void BerryToneView::timerCallback()
         updateBtn.setButtonText ("Update to v" + v);
         updateBtn.setTooltip ("BerryTone v" + v + " is on GitHub. Click to install.");
         updateBtn.setVisible (true);
+        repaint (hintBarBounds().expanded (4));
     }
 }
 

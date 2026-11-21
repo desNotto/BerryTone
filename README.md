@@ -27,12 +27,21 @@ For the next versions, use the update button in the plugin (see [Updates](#updat
 - **Top right:** the preset bar.
 - **Middle:** the DI Scope.
 - **Bottom:** eight cards. Seven cards are modules. The last card is **Juice Level** (Input, Output, meters).
-- **Footer:** the version, the update button, the window size buttons and **Reset order**.
+- **Footer:** the hint line (with the version or the update button at its right end), the hint language flags, the window size buttons and **Reset order**.
 
 Each module card has:
 - a number. The number is the position of the module in the signal chain.
 - an on/off switch. When the module is off, its knobs are dim and the module does not change the signal.
 - two or three knobs. Drag a knob up or down. Double-click a knob to set the default value. Click the value under the knob to type a number.
+
+## Hint line
+The hint line is at the bottom of the window.
+- Put the mouse on a module card (the header or any free area). The line shows the module name and what the module does.
+- Put the mouse on a knob. The line shows the knob name and what the knob does: the type of the block, the range and the result of a higher or lower value.
+- When you turn a knob, the line keeps the hint of this knob.
+- When the mouse is not on a module, the line shows a general hint.
+
+The flags **RU / EN** at the left of the window size buttons set the language of the hints. They change the hint texts only. The default language is Russian. The plugin saves the choice for all instances in `%APPDATA%\desNotto\BerryTone\settings.xml`.
 
 ## DI Scope
 The DI Scope shows the signal before and after the modules.
@@ -227,6 +236,11 @@ Layout check without a DAW: configure with `-DBERRY_SNAPSHOT=ON` and build the t
 The script builds the plugin and writes `BerryTone-v<version>` (the VST3 file and the zip) into the `Releases` folder next to the repository. With `-Publish`, it also makes the git tag and the GitHub release. The zip name must end with `-win64.zip`, because the updater looks for this name.
 
 ## Version history
+
+### 1.3.0
+- New hint line at the bottom of the window: a module hint on the card, a knob hint on the knob.
+- Hint texts in Russian and English. The RU / EN flags select the language (default: Russian).
+- The version and the update button are at the right end of the hint line.
 
 ### 1.2.1
 - The update button works again. The install script of 1.1.2 and 1.2.0 stopped with the error "Parameter set cannot be resolved" in Windows PowerShell 5.1.

@@ -380,7 +380,7 @@ void ThemeLookAndFeel::drawButtonBackground (Graphics& g, juce::Button& b, const
         return;
     }
 
-    if (st == "size")   // window size buttons: two halves of one pill
+    if (st == "size" || st == "flag")   // window size / hint language: two halves of one pill
     {
         const bool l = ! b.isConnectedOnLeft(), rt = ! b.isConnectedOnRight();
         const float rad = grape() ? 6.f : r.getHeight() * 0.5f;
@@ -586,6 +586,14 @@ void ThemeLookAndFeel::drawButtonText (Graphics& g, juce::TextButton& b, bool hl
 {
     const auto st = styleOf (b);
     if (st == "power") return;
+    if (st == "flag")
+    {
+        auto fr = b.getLocalBounds().toFloat().withSizeKeepingCentre (18.f, 12.f);
+        juce::Graphics::ScopedSaveState ss (g);
+        if (! b.getToggleState()) g.setOpacity (hl ? 0.8f : 0.55f);
+        drawFlag (g, fr, b.getProperties()["flag"].toString() == "ru");
+        return;
+    }
 
     auto r = b.getLocalBounds();
     const bool on = b.getToggleState();
@@ -740,4 +748,39 @@ void ThemeLookAndFeel::drawCornerResizer (Graphics& g, int w, int h, bool isMous
     p.startNewSubPath (13.f * sx, 7.f * sy);  p.lineTo (7.f * sx, 13.f * sy);
     p.startNewSubPath (13.f * sx, 11.f * sy); p.lineTo (11.f * sx, 13.f * sy);
     g.strokePath (p, juce::PathStrokeType (1.5f * sx, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
+//==============================================================================
+void ThemeLookAndFeel::drawFlag (Graphics& g, juce::Rectangle<float> r, bool russia)
+{
+    juce::Graphics::ScopedSaveState ss (g);
+    juce::Path clip;
+    clip.addRoundedRectangle (r, 1.5f);
+    g.reduceClipRegion (clip);
+    if (russia)
+    {
+        const float h = r.getHeight() / 3.f;
+        g.setColour (juce::Colours::white);       g.fillRect (r.withHeight (h));
+        g.setColour (Colour (0xff1c57c4));        g.fillRect (r.withY (r.getY() + h).withHeight (h));
+        g.setColour (Colour (0xffd52b1e));        g.fillRect (r.withY (r.getY() + 2.f * h).withHeight (h));
+    }
+    else
+    {
+        g.setColour (juce::Colours::white);
+        g.fillRect (r);
+        const float sh = r.getHeight() / 13.f;
+        g.setColour (Colour (0xffc8102e));
+        for (int i = 0; i < 13; i += 2)
+            g.fillRect (r.getX(), r.getY() + (float) i * sh, r.getWidth(), sh);
+        const auto canton = juce::Rectangle<float> (r.getX(), r.getY(), r.getWidth() * 0.42f, sh * 7.f);
+        g.setColour (Colour (0xff1f3a93));
+        g.fillRect (canton);
+        g.setColour (juce::Colours::white);
+        for (int row = 0; row < 4; ++row)
+            for (int col = 0; col < 4; ++col)
+                g.fillEllipse (canton.getX() + 1.f + (float) col * canton.getWidth() / 4.f,
+                               canton.getY() + 0.8f + (float) row * canton.getHeight() / 4.f, 0.9f, 0.9f);
+    }
+    g.setColour (juce::Colours::black.withAlpha (0.25f));
+    g.drawRoundedRectangle (r.reduced (0.25f), 1.5f, 0.5f);
 }

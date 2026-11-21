@@ -4,6 +4,7 @@
 #include "Theme.h"
 #include "ScopeView.h"
 #include "Updater.h"
+#include "Hints.h"
 
 // The whole plugin UI at its design size (940 x 700).
 // BerryToneAudioProcessorEditor (below) scales it to the window size.
@@ -26,6 +27,9 @@ public:
     void mouseUp   (const juce::MouseEvent&) override;
 
     ThemeLookAndFeel& getLookAndFeelTheme() { return lnf; }
+
+    // For the snapshot tool: show a hint as if the mouse were over it.
+    void showHintForTest (int moduleId, int knobIndex) { hintModule = moduleId; hintKnob = knobIndex; repaint(); }
 
     // The window size buttons (100% / 125%) call this.
     std::function<void (float)> onScaleRequest;
@@ -103,6 +107,13 @@ private:
     juce::TextButton presetPrev, presetNext, presetName, saveBtn { "Save" }, saveAsBtn { "Save as" },
                      renameBtn { "Rename" }, deleteBtn { "Delete" };
     juce::TextButton updateBtn, resetBtn { "Reset order" }, size100 { "100%" }, size125 { "125%" };
+    juce::TextButton langRu { "RU" }, langEn { "EN" };
+
+    // hint line: the module and the knob under the mouse
+    void updateHint();
+    void paintHintBar (juce::Graphics&);
+    juce::Rectangle<int> hintBarBounds() const;
+    int hintModule = -1, hintKnob = -1;
 
     juce::SharedResourcePointer<updater::UpdateChecker> checker;
     std::unique_ptr<updater::UpdateInstaller> installer;
